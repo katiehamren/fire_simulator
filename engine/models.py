@@ -90,9 +90,20 @@ class AccountBalances:
 class AnnualContributions:
     """Annual savings contributions.
 
-    W2 401(k) contributions are NOT stored here — they are auto-maxed at the IRS limit
-    for the simulation year (see annual_401k_ee_limit).
+    W2 401(k) contribution mode per person (while they have W2 income):
+      "max"     — contribute the IRS employee elective deferral limit each year,
+                  growing $500/yr (see annual_401k_ee_limit). Capped at W2 salary.
+      "dollar"  — contribute a fixed dollar amount each year (capped at IRS limit and W2).
+      "percent" — contribute a fixed % of gross W2 salary (capped at IRS limit).
     """
+    # W2 401(k) contribution settings
+    user_401k_mode: str = "max"      # "max" | "dollar" | "percent"
+    user_401k_amount: float = 0.0    # Fixed $ amount (mode == "dollar")
+    user_401k_pct: float = 0.0       # Fraction of W2 (mode == "percent"), e.g. 0.10 for 10%
+    spouse_401k_mode: str = "max"
+    spouse_401k_amount: float = 0.0
+    spouse_401k_pct: float = 0.0
+
     user_ira: float = 0.0      # While User has earned income (W2 or sole prop)
     spouse_ira: float = 0.0    # While Spouse has earned income
     brokerage: float = 0.0      # Annual savings to taxable brokerage; taken from surplus

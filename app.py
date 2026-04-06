@@ -29,7 +29,7 @@ from engine.models import (
     AccountBalances, AnnualContributions, Assumptions, SimInputs,
     RothConversionPlan, SEPPPlan, SpendingOverride,
 )
-from engine.simulator import run_simulation
+from engine.simulator import run_simulation, _compute_w2_401k
 from scenarios.defaults import PRESETS
 from chatbot.ui import render_chat_panel
 
@@ -129,14 +129,24 @@ def validate_inputs(inputs: SimInputs) -> list[tuple[str, str]]:
     m = lambda n: f"`{fmt(n)}`"
 
     # ── 401(k) shortfall check ───────────────────────────────────────────────
-    # Estimate year-0 surplus after auto-maxed 401k, IRAs, solo Roth contributions, and expenses.
+    # Estimate year-0 surplus after 401k, IRAs, solo Roth contributions, and expenses.
     # If negative, the contribution assumptions leave the household short of cash.
     _k_w2_0  = inputs.user_w2.gross_annual   if inputs.user.w2_stop_year   > CURRENT_YEAR else 0.0
     _h_w2_0  = inputs.spouse_w2.gross_annual if inputs.spouse.w2_stop_year > CURRENT_YEAR else 0.0
     _sp_0    = inputs.sole_prop.net_annual
     _lim_0   = float(_401K_LIMIT_2026)
-    _k401_0  = min(_lim_0, _k_w2_0)
-    _h401_0  = min(_lim_0, _h_w2_0)
+    _k401_0  = _compute_w2_401k(
+        inputs.contributions.user_401k_mode,
+        inputs.contributions.user_401k_amount,
+        inputs.contributions.user_401k_pct,
+        _k_w2_0, int(_lim_0),
+    )
+    _h401_0  = _compute_w2_401k(
+        inputs.contributions.spouse_401k_mode,
+        inputs.contributions.spouse_401k_amount,
+        inputs.contributions.spouse_401k_pct,
+        _h_w2_0, int(_lim_0),
+    )
 
     _ee = min(inputs.contributions.user_solo_401k_ee, _lim_0, _sp_0) if _sp_0 > 0 else 0.0
     _er = min(inputs.contributions.user_solo_401k_er_pct * _sp_0,
@@ -161,10 +171,10 @@ def validate_inputs(inputs: SimInputs) -> list[tuple[str, str]]:
 
     if _surplus_0 < 0:
         issues.append(("warning",
-            f"Auto-maxed 401(k) contributions create an estimated **year-1 cash shortfall of "
+            f"401(k) contributions create an estimated **year-1 cash shortfall of "
             f"{m(-_surplus_0)}.** "
             "Income after contributions and expenses is negative — the plan will draw from "
-            "savings immediately. Consider reducing IRA or solo Roth contributions, or "
+            "savings immediately. Consider reducing contributions, IRAs, or "
             "checking your spending assumption."))
 
     # IRA contribution above IRS limit
@@ -385,14 +395,65 @@ def build_inputs() -> SimInputs:
 
         # ── CONTRIBUTIONS ──
         with st.expander("📥 Annual Contributions"):
-            st.info(
-                f"**401(k) contributions are auto-maxed** at the IRS employee limit: "
-                f"**\\${_401K_LIMIT_2026:,}** in {CURRENT_YEAR}, growing **\\$500/yr** "
-                f"(\\${_401K_LIMIT_2026 + 500:,} in {CURRENT_YEAR + 1}, "
-                f"\\${_401K_LIMIT_2026 + 2_500:,} by {CURRENT_YEAR + 5}). "
-                "Applies to both User and Spouse while they have W2 income, capped at their W2 salary."
+            st.caption(
+                f"**W2 401(k)** — active while each person has W2 income. "
+                f"IRS employee limit: **\\${_401K_LIMIT_2026:,}** in {CURRENT_YEAR}, "
+                f"growing \\$500/yr. Contributions are always capped at W2 salary and the IRS limit."
             )
 
+            _MODE_LABELS = {
+                "max":     "Max out (IRS limit + $500/yr)",
+                "percent": "% of W2 salary",
+                "dollar":  "Fixed $ amount",
+            }
+            _MODE_KEYS = list(_MODE_LABELS.keys())
+
+            col_u, col_s = st.columns(2)
+            with col_u:
+                st.markdown("**User**")
+                u_401k_mode = st.radio(
+                    "Contribution mode", _MODE_KEYS,
+                    format_func=lambda k: _MODE_LABELS[k],
+                    key="u401k_mode",
+                )
+                if u_401k_mode == "dollar":
+                    u_401k_amount = float(st.number_input(
+                        "Amount/yr ($)", value=10_000, step=500, min_value=0, key="u401k_amt",
+                        help=f"Contributed each year, capped at the IRS limit (\\${_401K_LIMIT_2026:,} in {CURRENT_YEAR}) and W2 salary.",
+                    ))
+                    u_401k_pct = 0.0
+                elif u_401k_mode == "percent":
+                    u_401k_pct = st.slider(
+                        "% of gross W2", 1, 100, 10, 1, format="%d%%", key="u401k_pct",
+                    ) / 100.0
+                    u_401k_amount = 0.0
+                else:
+                    u_401k_amount = 0.0
+                    u_401k_pct = 0.0
+
+            with col_s:
+                st.markdown("**Spouse**")
+                s_401k_mode = st.radio(
+                    "Contribution mode", _MODE_KEYS,
+                    format_func=lambda k: _MODE_LABELS[k],
+                    key="s401k_mode",
+                )
+                if s_401k_mode == "dollar":
+                    s_401k_amount = float(st.number_input(
+                        "Amount/yr ($)", value=10_000, step=500, min_value=0, key="s401k_amt",
+                        help=f"Contributed each year, capped at the IRS limit (\\${_401K_LIMIT_2026:,} in {CURRENT_YEAR}) and W2 salary.",
+                    ))
+                    s_401k_pct = 0.0
+                elif s_401k_mode == "percent":
+                    s_401k_pct = st.slider(
+                        "% of gross W2", 1, 100, 10, 1, format="%d%%", key="s401k_pct",
+                    ) / 100.0
+                    s_401k_amount = 0.0
+                else:
+                    s_401k_amount = 0.0
+                    s_401k_pct = 0.0
+
+            st.divider()
             st.caption("IRA — while person has earned income (W2 or self-employment):")
             k_ira_c = st.number_input("User IRA/yr ($)",    value=7_000, step=500, key="uirac")
             h_ira_c = st.number_input("Spouse IRA/yr ($)", value=7_000, step=500, key="sirac")
@@ -598,6 +659,12 @@ def build_inputs() -> SimInputs:
             brokerage, hsa, cash_bal,
         ),
         contributions=AnnualContributions(
+            user_401k_mode=u_401k_mode,
+            user_401k_amount=u_401k_amount,
+            user_401k_pct=u_401k_pct,
+            spouse_401k_mode=s_401k_mode,
+            spouse_401k_amount=s_401k_amount,
+            spouse_401k_pct=s_401k_pct,
             user_ira=k_ira_c, spouse_ira=h_ira_c, brokerage=brok_c,
             user_solo_401k_ee=float(solo_ee),
             user_solo_401k_ee_type=solo_ee_type,

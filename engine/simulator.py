@@ -28,6 +28,16 @@ from .models import SimInputs, YearSnapshot, CURRENT_YEAR, annual_401k_ee_limit,
 _SOLO_401K_TOTAL_LIMIT = 70_000
 
 
+def _compute_w2_401k(mode: str, amount: float, pct: float, w2: float, ee_limit: int) -> float:
+    """Compute W2 401(k) employee contribution for the year based on the chosen mode."""
+    if mode == "dollar":
+        return min(amount, ee_limit, w2)
+    elif mode == "percent":
+        return min(pct * w2, ee_limit, w2)
+    else:  # "max"
+        return min(ee_limit, w2)
+
+
 def _sepp_amortization(balance: float, n_years: float, rate: float) -> float:
     """Amortization method: fixed annual payment over n_years years."""
     n = max(n_years, 5.0)
@@ -88,10 +98,24 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
         user_has_earned   = (user_w2 > 0) or (sole_prop > 0)
         spouse_has_earned = (spouse_w2 > 0)
 
-        # W2 401(k): auto-maxed at the IRS employee deferral limit for this year, capped at W2
+        # W2 401(k): contribution determined by each person's chosen mode
         ee_limit = annual_401k_ee_limit(year)
-        user_401k_contrib   = min(ee_limit, user_w2)   if year < inputs.user.w2_stop_year   else 0.0
-        spouse_401k_contrib = min(ee_limit, spouse_w2) if year < inputs.spouse.w2_stop_year else 0.0
+        user_401k_contrib = (
+            _compute_w2_401k(
+                inputs.contributions.user_401k_mode,
+                inputs.contributions.user_401k_amount,
+                inputs.contributions.user_401k_pct,
+                user_w2, ee_limit,
+            ) if year < inputs.user.w2_stop_year else 0.0
+        )
+        spouse_401k_contrib = (
+            _compute_w2_401k(
+                inputs.contributions.spouse_401k_mode,
+                inputs.contributions.spouse_401k_amount,
+                inputs.contributions.spouse_401k_pct,
+                spouse_w2, ee_limit,
+            ) if year < inputs.spouse.w2_stop_year else 0.0
+        )
 
         # IRA contributions
         user_ira_contrib   = inputs.contributions.user_ira   if user_has_earned   else 0.0
