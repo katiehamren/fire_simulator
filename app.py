@@ -13,6 +13,7 @@ Key simplifications in v1:
 import chatbot.env  # noqa: F401 — load .env into os.environ before other imports
 
 import copy
+import hashlib
 import io
 import json
 import re
@@ -31,6 +32,7 @@ from engine.models import (
 )
 from engine.simulator import run_simulation, _compute_w2_401k
 from engine.tax_calc import compute_federal_tax
+from engine.insights import compute_all_insights
 from scenarios.defaults import PRESETS
 from chatbot.ui import render_chat_panel
 
@@ -192,20 +194,6 @@ def validate_inputs(inputs: SimInputs) -> list[tuple[str, str]]:
         issues.append(("warning",
             f"Spouse's IRA contribution ({m(inputs.contributions.spouse_ira)}/yr) exceeds "
             f"the {CURRENT_YEAR} annual IRA limit ({m(_IRA_LIMIT_2026)})."))
-
-    # Spending vs. sustainable passive income
-    annual_rental_noi = (
-        inputs.rental.monthly_gross_rent * 12
-        * (1 - inputs.rental.vacancy_rate)
-        * (1 - inputs.rental.expense_ratio)
-    )
-    max_passive = inputs.sole_prop.net_annual + annual_rental_noi
-    if inputs.assumptions.annual_spending_today > max_passive and max_passive > 0:
-        gap = inputs.assumptions.annual_spending_today - max_passive
-        issues.append(("warning",
-            f"Annual spending ({m(inputs.assumptions.annual_spending_today)}) "
-            f"exceeds total passive income ({m(max_passive)}/yr) by {m(gap)}/yr. "
-            "The plan depends on drawing from savings every year after both W2 incomes stop."))
 
     # Simulation window too short
     last_retire = max(inputs.user.w2_stop_year, inputs.spouse.w2_stop_year)
@@ -1051,139 +1039,170 @@ def render_detail(df: pd.DataFrame):
     )
 
 
-# ── TAB: SCENARIO COMPARISON ─────────────────────────────────────────────────
+# ── TAB: INSIGHTS ────────────────────────────────────────────────────────────
 
-_SCENARIO_COLORS = ["#2563eb", "#dc2626", "#16a34a"]
-_SCENARIO_DASHES = [
-    dict(width=2.5),
-    dict(width=2.5, dash="dash"),
-    dict(width=2.5, dash="dot"),
-]
-_SCENARIO_DEFAULTS = [
-    ("Base Case",        0,  0, None, None),   # (name, user_w2_stop_offset, spouse_w2_stop_offset, return_override, spend_override)
-    ("Early Retirement", -2, 0, None, None),
-    ("Conservative",     0,  0, 0.05, None),
-]
+def _generate_narrative(insights: dict, inputs: SimInputs) -> str:
+    """Call OpenAI to synthesize insights into a narrative."""
+    from openai import OpenAI
+
+    from chatbot.env import resolve_openai_api_key
+
+    key = resolve_openai_api_key(st.session_state.get("openai_key"))
+    if not key:
+        return "No OpenAI API key available. Set the OPENAI_API_KEY environment variable."
+
+    model = st.session_state.get("chat_model", "gpt-4o").lower()
+    client = OpenAI(api_key=key)
+
+    prompt = f"""You are a retirement planning analyst. Given the following computed insights
+from a retirement simulation, write a concise (2-3 paragraphs) narrative summary with
+actionable observations. Focus on what matters most for early retirement success.
+
+NEVER give specific investment advice or recommend securities. NEVER give specific tax advice.
+Frame observations as "this plan shows..." or "consider whether..." rather than "you should...".
+
+Use dollar formatting with commas. Do not use markdown headers — write flowing prose.
+Do not use backtick formatting for numbers.
+
+Plan context:
+- User stops W2: {inputs.user.w2_stop_year} (age {inputs.user.w2_stop_year - inputs.user.birth_year})
+- Spouse stops W2: {inputs.spouse.w2_stop_year} (age {inputs.spouse.w2_stop_year - inputs.spouse.birth_year})
+- Annual spending: ${inputs.assumptions.annual_spending_today:,.0f}
+- Market return assumption: {inputs.assumptions.market_return_rate:.1%}
+- Simulation end year: {inputs.end_year}
+
+Computed insights:
+{json.dumps(insights, indent=2, default=str)}
+"""
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3,
+        max_tokens=800,
+    )
+    return response.choices[0].message.content.strip()
 
 
-def render_scenario_comparison(base_inputs: SimInputs):
-    st.header("Scenario Comparison")
+def render_insights(_df: pd.DataFrame, snapshots, inputs: SimInputs):
+    st.header("Insights")
     st.caption(
-        "Each scenario inherits the sidebar inputs. Override key variables below "
-        "to compare retirement-date, return-rate, or spending scenarios side by side."
+        "Key metrics computed from your simulation to help identify risks, "
+        "opportunities, and optimization windows."
     )
 
-    n_cols = st.radio("Scenarios to compare", [2, 3], index=0, horizontal=True, key="sc_n")
+    insights = compute_all_insights(snapshots, inputs)
 
-    st.divider()
-    scols = st.columns(n_cols)
-    scenario_results = []
-
-    for i in range(n_cols):
-        d_name, d_k_off, d_h_off, d_ret, _ = _SCENARIO_DEFAULTS[i]
-        d_user_stop = base_inputs.user.w2_stop_year + d_k_off
-        d_spouse_stop   = base_inputs.spouse.w2_stop_year + d_h_off
-        d_ret_pct    = (d_ret if d_ret is not None else base_inputs.assumptions.market_return_rate) * 100
-        d_spend      = int(base_inputs.assumptions.annual_spending_today)
-
-        with scols[i]:
-            st.markdown(f"**Scenario {i + 1}**")
-            name = st.text_input("Name", value=d_name, key=f"sc_name_{i}")
-            user_stop = st.number_input(
-                "User W2 stop year", value=max(CURRENT_YEAR, d_user_stop),
-                min_value=CURRENT_YEAR, max_value=2055, key=f"sc_us_{i}",
-            )
-            spouse_stop = st.number_input(
-                "Spouse W2 stop year", value=d_spouse_stop,
-                min_value=CURRENT_YEAR, max_value=2055, key=f"sc_ss_{i}",
-            )
-            ret = st.slider(
-                "Market return", 3.0, 12.0, float(d_ret_pct), 0.5,
-                format="%.1f%%", key=f"sc_ret_{i}",
-            ) / 100
-            spend = st.number_input(
-                "Annual spending ($)", value=d_spend, step=5_000, key=f"sc_sp_{i}",
-            )
-
-            inp = copy.deepcopy(base_inputs)
-            inp.user.w2_stop_year   = user_stop
-            inp.spouse.w2_stop_year = spouse_stop
-            inp.assumptions.market_return_rate   = ret
-            inp.assumptions.annual_spending_today = spend
-            df = to_df(run_simulation(inp), inp.assumptions.inflation_rate)
-            scenario_results.append((name, df, inp))
-
-    # ── Summary metrics ───────────────────────────────────────────────────────
-    st.divider()
-    st.subheader("At a Glance")
-    metric_cols = st.columns(n_cols)
-
-    for col, (name, df, inp) in zip(metric_cols, scenario_results):
-        first_bad = df[~df["plan_solvent"]]
-        solvent_through = first_bad["year"].min() - 1 if not first_bad.empty else df["year"].max()
-        fully_solvent   = solvent_through == df["year"].max()
-
-        bridge_start = inp.user.w2_stop_year
-        bridge_end   = min(inp.user.birth_year + 60, inp.spouse.birth_year + 60)
-        bridge_df    = df[(df["year"] >= bridge_start) & (df["year"] < bridge_end)]
-        deficit = bridge_df[bridge_df["net_cashflow"] < 0]["net_cashflow"].sum() if not bridge_df.empty else 0.0
-
-        col.markdown(f"**{name}**")
-        col.metric("Plan health", "✅ Solvent" if fully_solvent else f"⚠️ Ends {solvent_through + 1}")
-        col.metric("Peak net worth", fmt(df["total_net_worth"].max()))
-        col.metric(f"Net worth {df['year'].max()}", fmt(df.iloc[-1]["total_net_worth"]))
-        col.metric(
-            f"Bridge deficit ({bridge_start}–{bridge_end})",
-            "$0" if deficit >= 0 else fmt(abs(deficit)),
+    # ── 1. Financial Independence Crossover ──
+    st.subheader("Financial Independence Crossover")
+    fi = insights["fi_crossover"]
+    if fi:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Returns cover expenses", str(fi["year"]))
+        c2.metric("User age", str(fi["user_age"]))
+        c3.metric("Spouse age", str(fi["spouse_age"]))
+        st.info(
+            f"Investment returns first exceed annual expenses in **{fi['year']}**. "
+            "After this point, the portfolio can sustain spending from growth alone "
+            "without drawing down principal."
+        )
+    else:
+        st.warning(
+            "Investment returns never fully cover annual expenses in this plan. "
+            "The portfolio relies on principal drawdown throughout."
         )
 
-    # ── Net Worth chart ───────────────────────────────────────────────────────
     st.divider()
-    fig = go.Figure()
-    for i, (name, df, _) in enumerate(scenario_results):
-        fig.add_trace(go.Scatter(
-            x=df["year"], y=df["total_net_worth"],
-            name=name, line={**_SCENARIO_DASHES[i], "color": _SCENARIO_COLORS[i]},
-        ))
-    fig.update_layout(
-        title="Net Worth Comparison",
-        xaxis_title="Year", yaxis_title="Value ($)",
-        yaxis_tickformat="$,.0f", height=400,
-        legend=dict(orientation="h", y=-0.22), margin=dict(t=50),
-    )
-    st.plotly_chart(fig, width="stretch")
 
-    # ── Cash Flow chart ───────────────────────────────────────────────────────
-    fig2 = go.Figure()
-    for i, (name, df, _) in enumerate(scenario_results):
-        fig2.add_trace(go.Scatter(
-            x=df["year"], y=df["net_cashflow"],
-            name=name, line={**_SCENARIO_DASHES[i], "color": _SCENARIO_COLORS[i]},
-        ))
-    fig2.add_hline(y=0, line_color="black", line_width=1)
-    fig2.update_layout(
-        title="Annual Cash Flow Comparison",
-        xaxis_title="Year", yaxis_title="Cash Flow ($)",
-        yaxis_tickformat="$,.0f", height=320,
-        legend=dict(orientation="h", y=-0.30), margin=dict(t=50),
+    # ── 2. Bridge Period Burn Rate ──
+    st.subheader("Bridge Period")
+    bb = insights["bridge_burn"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric(
+        f"Bridge period ({bb['bridge_start']}–{bb['bridge_end']})",
+        f"{bb['years']} years",
     )
-    st.plotly_chart(fig2, width="stretch")
+    c2.metric("Avg annual drawdown", fmt(abs(bb["avg_annual_deficit"])))
+    c3.metric(
+        "Liquid assets consumed",
+        f"{bb['pct_liquid_consumed']:.0f}%",
+    )
 
-    # ── Retirement account balances chart ─────────────────────────────────────
-    fig3 = go.Figure()
-    for i, (name, df, _) in enumerate(scenario_results):
-        fig3.add_trace(go.Scatter(
-            x=df["year"], y=df["total_retirement_accounts"],
-            name=f"{name} — Retirement Accounts",
-            line={**_SCENARIO_DASHES[i], "color": _SCENARIO_COLORS[i]},
-        ))
-    fig3.update_layout(
-        title="Retirement Account Balances Comparison",
-        xaxis_title="Year", yaxis_title="Balance ($)",
-        yaxis_tickformat="$,.0f", height=320,
-        legend=dict(orientation="h", y=-0.30), margin=dict(t=50),
+    st.divider()
+
+    # ── 3. Tax Efficiency Windows ──
+    st.subheader("Tax Efficiency")
+    tw = insights["tax_windows"]
+    lt = insights["lifetime_tax"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Lifetime federal tax", fmt(lt["total_tax"]))
+    c2.metric(
+        f"Accumulation (avg {lt['avg_accumulation_rate']:.1%})",
+        fmt(lt["accumulation_tax"]),
     )
-    st.plotly_chart(fig3, width="stretch")
+    c3.metric(
+        f"Drawdown (avg {lt['avg_drawdown_rate']:.1%})",
+        fmt(lt["drawdown_tax"]),
+    )
+    if tw:
+        st.info(
+            f"Lowest-tax window: **{tw['low_tax_start']}–{tw['low_tax_end']}** "
+            f"(avg effective rate {tw['avg_effective_rate']:.1%}). "
+            f"Best single year: {tw['lowest_year']} at {tw['lowest_rate']:.1%}. "
+            "This is the optimal window for Roth conversions or realizing capital gains."
+        )
+
+    st.divider()
+
+    # ── 4. RMD Pressure ──
+    st.subheader("RMD Outlook")
+    rmd = insights["rmd_pressure"]
+    if rmd:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("RMDs begin", str(rmd["first_rmd_year"]))
+        c2.metric("Peak RMD", fmt(rmd["peak_rmd"]), f"Year {rmd['peak_rmd_year']}")
+        c3.metric("Peak RMD vs expenses", f"{rmd['peak_rmd_expense_pct']:.0f}%")
+        if rmd["exceeds_expenses_year"]:
+            st.warning(
+                f"RMDs exceed annual expenses starting **{rmd['exceeds_expenses_year']}**. "
+                "This creates forced taxable income beyond what you need to spend. "
+                "Pre-retirement Roth conversions could reduce this pressure."
+            )
+    else:
+        st.info("No RMDs in this simulation window (neither person reaches age 73).")
+
+    st.divider()
+
+    # ── 5. Income Source Dependency ──
+    st.subheader("Income Source Dependency")
+    dep = insights["income_dependency"]
+    c1, c2 = st.columns(2)
+
+    sp = dep["without_sole_prop"]
+    if sp["still_solvent"]:
+        c1.metric("Without sole prop", "✅ Solvent", delta_color="off")
+        c1.caption(f"Final net worth: {fmt(sp['final_net_worth'])}")
+    else:
+        c1.metric("Without sole prop", f"❌ Fails {sp['insolvent_year']}", delta_color="off")
+
+    rent = dep["without_rental"]
+    if rent["still_solvent"]:
+        c2.metric("Without rental income", "✅ Solvent", delta_color="off")
+        c2.caption(f"Final net worth: {fmt(rent['final_net_worth'])}")
+    else:
+        c2.metric("Without rental income", f"❌ Fails {rent['insolvent_year']}", delta_color="off")
+
+    st.divider()
+
+    # ── 6. AI Narrative Summary ──
+    st.subheader("AI Summary")
+    if st.button("Generate AI Summary", key="gen_insights_summary"):
+        with st.spinner("Analyzing your plan..."):
+            narrative = _generate_narrative(insights, inputs)
+            st.session_state["insights_narrative"] = narrative
+
+    if "insights_narrative" in st.session_state:
+        st.markdown(st.session_state["insights_narrative"])
 
 
 # ── TAB: SENSITIVITY ANALYSIS ────────────────────────────────────────────────
@@ -1477,6 +1496,11 @@ def render_bridge_strategies(df: pd.DataFrame, inputs: SimInputs):
                 )
 
 
+def _inputs_hash(inputs: SimInputs) -> str:
+    """Quick hash of inputs to detect sidebar changes."""
+    return hashlib.md5(str(inputs).encode()).hexdigest()
+
+
 # ── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1493,12 +1517,17 @@ def main():
     st.session_state["sim_inputs"] = inputs
     st.session_state["sim_df"] = df
 
+    current_hash = _inputs_hash(inputs)
+    if st.session_state.get("_insights_hash") != current_hash:
+        st.session_state.pop("insights_narrative", None)
+        st.session_state["_insights_hash"] = current_hash
+
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊 Overview",
         "💰 Income & Cash Flow",
         "🏦 Account Balances",
         "📋 Year-by-Year Detail",
-        "🔀 Scenario Comparison",
+        "💡 Insights",
         "📉 Sensitivity",
         "🔑 Bridge Strategies",
     ])
@@ -1512,7 +1541,7 @@ def main():
     with tab4:
         render_detail(df)
     with tab5:
-        render_scenario_comparison(inputs)
+        render_insights(df, snapshots, inputs)
     with tab6:
         render_sensitivity(inputs)
     with tab7:
