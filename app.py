@@ -349,7 +349,7 @@ def build_inputs() -> SimInputs:
                 help="How far out to project. Consider running to late 80s for both.")
 
         # ── INCOME ──
-        with st.expander("💼 W2 & Sole Prop Income"):
+        with st.expander("💼 W2 Income"):
             st.markdown("**User's W2** *(active until stop year)*")
             k_w2 = st.number_input("Gross salary ($/yr)", value=120_000, step=5_000, key="u_w2")
             k_raise = st.slider("Annual raise", 0.0, 8.0, 3.0, 0.5, format="%.1f%%", key="u_raise",
@@ -360,18 +360,6 @@ def build_inputs() -> SimInputs:
             h_w2 = st.number_input("Gross salary ($/yr)", value=150_000, step=5_000, key="s_w2")
             h_raise = st.slider("Annual raise", 0.0, 8.0, 3.0, 0.5, format="%.1f%%", key="s_raise",
                                 help="Compounding annual salary increase applied each year until W2 stops.") / 100
-
-            st.divider()
-            st.markdown("**User's sole proprietorship**")
-            sp_net = st.number_input("Net income ($/yr)", value=40_000, step=5_000, key="sp_net",
-                                      help="After business expenses, before income tax.")
-            sp_growth = st.slider("Annual growth", -5.0, 20.0, 5.0, 1.0, format="%.1f%%", key="sp_gr") / 100
-            sp_years = st.number_input(
-                "Years of sole prop income", value=20, min_value=1, max_value=50, key="sp_years",
-                help=f"How many years from {CURRENT_YEAR} the business generates income. "
-                     f"Income drops to $0 after this period.",
-            )
-            st.caption(f"Active through: **{CURRENT_YEAR + int(sp_years) - 1}**")
 
         # ── ACCOUNTS ──
         with st.expander("🏦 Account Balances (today)"):
@@ -462,8 +450,21 @@ def build_inputs() -> SimInputs:
             brok_c = st.number_input("Brokerage/yr ($)", value=20_000, step=5_000, key="brokc",
                                       help="Amount to save in taxable brokerage if there is surplus income.")
 
-        # ── SOLO 401(k) ──
-        with st.expander("🏢 User's Solo 401(k)", expanded=False):
+        # ── SOLE PROP ──
+        with st.expander("🏢 Sole Proprietorship", expanded=False):
+            st.markdown("**Income**")
+            sp_net = st.number_input("Net income ($/yr)", value=40_000, step=5_000, key="sp_net",
+                                      help="After business expenses, before income tax.")
+            sp_growth = st.slider("Annual growth", -5.0, 20.0, 5.0, 1.0, format="%.1f%%", key="sp_gr") / 100
+            sp_years = st.number_input(
+                "Years active", value=20, min_value=1, max_value=50, key="sp_years",
+                help=f"How many years from {CURRENT_YEAR} the business generates income. "
+                     f"Income drops to $0 after this period.",
+            )
+            st.caption(f"Active through: **{CURRENT_YEAR + int(sp_years) - 1}**")
+
+            st.divider()
+            st.markdown("**Solo 401(k)**")
             st.caption(
                 "Active as long as sole prop income > $0. "
                 "Pre-tax reduces SE taxable income now; Roth grows tax-free and builds "
