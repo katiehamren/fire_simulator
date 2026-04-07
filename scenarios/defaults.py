@@ -25,7 +25,7 @@ _BASE = {
     "uirac": 7_000, "sirac": 7_000, "brokc": 20_000,
     "solo_ee": 0, "solo_ee_type": "pretax", "solo_er_pct": 0, "solo_er_type": "pretax",
     # Assumptions
-    "taxr": 22.0, "mret_preset": "Base (7%)", "inf": 3.0,
+    "mret_preset": "Base (7%)", "inf": 3.0,
     "spend": 90_000, "hccost": 24_000,
 }
 

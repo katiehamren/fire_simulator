@@ -11,11 +11,12 @@ for person-level fields). Roth conversion `source` and SEPP `account` are the st
 ## Simulator mechanics
 
 - The engine projects **calendar years** from the current year through an end year, using the household
-  inputs set in the sidebar (salaries, retirement dates, accounts, spending, healthcare, tax rate,
-  market return, inflation, optional Roth conversion plan, optional SEPP 72(t) plan).
-- **Tax:** A single **flat effective tax rate** applies to ordinary taxable income (W-2 after pre-tax
-  401(k), sole prop after pre-tax solo 401(k) deductions, SEPP, RMDs). Rental cash flow is **not** in that
-  ordinary-income bucket. Roth conversion amounts trigger extra tax at the same flat rate.
+  inputs set in the sidebar (salaries, retirement dates, accounts, spending, healthcare, market return,
+  inflation, optional Roth conversion plan, optional SEPP 72(t) plan).
+- **Tax:** Uses **2025 federal progressive brackets** (MFJ) with a **$31,500 standard deduction**.
+  Ordinary taxable income = W-2 (after pre-tax 401(k)) + sole prop (after pre-tax solo 401(k))
+  + SEPP + RMDs. Rental cash flow is **not** in the ordinary-income bucket. Roth conversion
+  amounts are taxed at the **marginal rate** on top of ordinary income.
 - **Spending & healthcare:** Spending grows with inflation. Healthcare is a fixed off-employer annual cost
   (today’s dollars, inflated) when neither spouse has W-2 income; $0 when on employer coverage.
 - **Returns:** Uniform real return on invested accounts; cash earns no return.
@@ -29,14 +30,15 @@ for person-level fields). Roth conversion `source` and SEPP `account` are the st
   **accessible_roth_seasoned** is cumulative converted principal that has aged at least **five years**.
 - **SEPP (72(t)):** Optional fixed annual payment from one person’s pre-tax 401(k)+trad IRA, amortization
   method; taxable income; plan runs until the later of **5 years** or **age 59½** in the model.
-- **Not modeled:** Social Security, state income tax, detailed ACA subsidies/MAGI cliffs, marginal tax
-  brackets, RMD aggregation rules beyond this simplified split.
+- **Not modeled:** Social Security, state income tax, detailed ACA subsidies/MAGI cliffs, RMD aggregation
+  rules beyond this simplified split.
 
 ## YearSnapshot fields (each simulated year)
 
 - **Identities:** year, user_age, spouse_age
 - **Income (gross / cashflow):** user_w2_gross, spouse_w2_gross, sole_prop_net, rental_cashflow
 - **Tax / income:** gross_taxable_income, taxes_paid, total_net_income
+- **Tax detail:** marginal_tax_rate, effective_tax_rate (computed per-year from progressive brackets)
 - **Expenses:** spending, healthcare, total_expenses
 - **Cashflow:** net_cashflow
 - **Balances (EOY):** user_401k_pretax, user_401k_roth, user_trad_ira, user_roth_ira,
@@ -77,8 +79,8 @@ says otherwise.
 
 ## Contextual disclaimers (only when relevant)
 
-- User asks about **tax brackets / marginal rates** → note the sim uses a **flat effective rate**, not
-  progressive brackets.
+- User asks about **tax brackets / marginal rates** → the sim uses **2025 MFJ federal brackets**;
+  note it does **not** model state taxes, AMT, NIIT, or bracket inflation over time.
 - **Very late retirement / lifetime income** → note **Social Security is not modeled**.
 - **State tax** → note the sim is **federal-style only**; no state income tax.
 - **ACA, MAGI, premium tax credit cliffs** → note **gross_taxable_income** (and related fields) are a

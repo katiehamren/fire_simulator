@@ -18,7 +18,6 @@ _WHAT_IF_OVERRIDE_KEYS = frozenset({
     "spouse_ira",
     "market_return_rate",
     "inflation_rate",
-    "effective_tax_rate",
     "sole_prop_net",
     "sole_prop_years",
     "rental_monthly_rent",
@@ -100,8 +99,6 @@ def _apply_what_if_overrides(inp, overrides: dict) -> None:
         inp.assumptions.market_return_rate = float(o["market_return_rate"])
     if "inflation_rate" in o:
         inp.assumptions.inflation_rate = float(o["inflation_rate"])
-    if "effective_tax_rate" in o:
-        inp.assumptions.effective_tax_rate = float(o["effective_tax_rate"])
     if "sole_prop_net" in o:
         inp.sole_prop.net_annual = float(o["sole_prop_net"])
     if "sole_prop_years" in o:
@@ -243,7 +240,6 @@ RUN_WHAT_IF_SCHEMA = {
                             "description": "Annual investment return, decimal (e.g. 0.07).",
                         },
                         "inflation_rate": {"type": "number", "description": "Annual inflation, decimal."},
-                        "effective_tax_rate": {"type": "number", "description": "Flat effective tax rate on ordinary income, decimal."},
                         "sole_prop_net": {"type": "number", "description": "Sole proprietorship net annual income (today's dollars)."},
                         "sole_prop_years": {"type": "integer", "description": "Years sole prop stays active from current year."},
                         "rental_monthly_rent": {"type": "number", "description": "Monthly gross rent on the rental property."},

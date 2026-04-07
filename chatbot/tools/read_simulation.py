@@ -2,7 +2,11 @@
 
 import streamlit as st
 
+from engine.tax_calc import compute_federal_tax
+
 from .utils import bridge_years, filter_years, snap_to_dict
+
+_TAX_METHOD = "2025 MFJ progressive brackets with $31,500 standard deduction"
 
 _VALID_QUERIES = frozenset({
     "summary", "yearly_detail", "rmds", "income_sources",
@@ -48,7 +52,7 @@ def _handle_summary(snapshots, inputs) -> dict:
         "inputs_context": {
             "inflation_rate": inputs.assumptions.inflation_rate,
             "market_return_rate": inputs.assumptions.market_return_rate,
-            "effective_tax_rate": inputs.assumptions.effective_tax_rate,
+            "tax_method": _TAX_METHOD,
             "annual_spending_today": inputs.assumptions.annual_spending_today,
         },
     }
@@ -60,7 +64,7 @@ def _handle_yearly_detail(snapshots, inputs, start_year, end_year) -> dict:
         "data": [snap_to_dict(s) for s in snaps],
         "inputs_context": {
             "inflation_rate": inputs.assumptions.inflation_rate,
-            "effective_tax_rate": inputs.assumptions.effective_tax_rate,
+            "tax_method": _TAX_METHOD,
         },
     }
 
@@ -84,8 +88,8 @@ def _handle_rmds(snapshots, inputs, start_year, end_year) -> dict:
     return {
         "data": rows,
         "inputs_context": {
-            "effective_tax_rate": inputs.assumptions.effective_tax_rate,
-            "note": "RMDs begin at age 73 per SECURE 2.0; taxed as ordinary income at the flat effective rate.",
+            "tax_method": _TAX_METHOD,
+            "note": "RMDs begin at age 73 per SECURE 2.0; taxed as ordinary income under federal progressive brackets.",
         },
     }
 
@@ -115,7 +119,7 @@ def _handle_income_sources(snapshots, inputs, start_year, end_year) -> dict:
             "sole_prop_years_active": inputs.sole_prop.years_active,
             "rental_vacancy_rate": inputs.rental.vacancy_rate,
             "rental_expense_ratio": inputs.rental.expense_ratio,
-            "effective_tax_rate": inputs.assumptions.effective_tax_rate,
+            "tax_method": _TAX_METHOD,
         },
     }
 
@@ -215,10 +219,12 @@ def _handle_cashflow(snapshots, inputs, start_year, end_year) -> dict:
 
 def _handle_roth_ladder(snapshots, inputs, start_year, end_year) -> dict:
     snaps = filter_years(snapshots, start_year, end_year)
-    tax_rate = inputs.assumptions.effective_tax_rate
     rows = []
     for s in snaps:
-        conversion_tax_cost = s.roth_conversion_amount * tax_rate
+        conversion_tax_cost = (
+            compute_federal_tax(s.gross_taxable_income + s.roth_conversion_amount)
+            - compute_federal_tax(s.gross_taxable_income)
+        )
         rows.append({
             "year": s.year,
             "user_age": s.user_age,
@@ -237,7 +243,7 @@ def _handle_roth_ladder(snapshots, inputs, start_year, end_year) -> dict:
             "roth_conversion_end_year": inputs.roth_conversion.end_year,
             "roth_conversion_annual_amount": inputs.roth_conversion.annual_amount,
             "roth_conversion_source": inputs.roth_conversion.source,
-            "effective_tax_rate": tax_rate,
+            "tax_method": _TAX_METHOD,
             "note": (
                 "Converted principal is accessible penalty-free after 5 years (Roth conversion ladder). "
                 "accessible_roth_seasoned is cumulative conversions ≥5 years old."

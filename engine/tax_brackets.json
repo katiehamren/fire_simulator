@@ -1,0 +1,14 @@
+{
+  "filing_status": "married_filing_jointly",
+  "tax_year": 2025,
+  "standard_deduction": 31500,
+  "brackets": [
+    { "rate": 0.10, "min": 0 },
+    { "rate": 0.12, "min": 23850 },
+    { "rate": 0.22, "min": 96950 },
+    { "rate": 0.24, "min": 206700 },
+    { "rate": 0.32, "min": 394600 },
+    { "rate": 0.35, "min": 501050 },
+    { "rate": 0.37, "min": 751600 }
+  ]
+}

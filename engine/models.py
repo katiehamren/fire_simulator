@@ -116,7 +116,6 @@ class AnnualContributions:
 
 @dataclass
 class Assumptions:
-    effective_tax_rate: float = 0.22          # Flat effective rate on W2 + sole prop gross income
     market_return_rate: float = 0.07          # Annual investment return
     inflation_rate: float = 0.03              # Annual inflation
     annual_spending_today: float = 90_000.0   # Annual household spending in TODAY's dollars
@@ -240,3 +239,7 @@ class YearSnapshot:
     # RMDs (pre-tax 401k + Traditional IRA, age 73+)
     user_rmd: float = 0.0
     spouse_rmd: float = 0.0
+
+    # Tax detail (computed from progressive brackets on ordinary gross_taxable_income)
+    marginal_tax_rate: float = 0.0
+    effective_tax_rate: float = 0.0  # federal tax on ordinary income / gross_taxable_income

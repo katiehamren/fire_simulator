@@ -2,7 +2,7 @@
 Year-by-year retirement simulation engine.
 
 Simplified assumptions:
-- Tax is a flat effective rate on W2 + sole prop + SEPP + RMD income (not rental)
+- Federal tax uses progressive brackets (MFJ) with standard deduction on W2 + sole prop + SEPP + RMD (not rental)
 - Roth conversion tax is computed separately and deducted from surplus
 - Rental cashflow is included post-expense (NOI - mortgage)
 - Market returns applied uniformly to all investment accounts
@@ -23,6 +23,7 @@ import copy
 from typing import List
 
 from .models import SimInputs, YearSnapshot, CURRENT_YEAR, annual_401k_ee_limit, rmd_factor
+from .tax_calc import compute_federal_tax, effective_rate, marginal_rate
 # IRS 401(k) combined limit (employee + employer); grows with inflation but we keep this fixed
 # as a conservative ceiling — the employee-only cap (annual_401k_ee_limit) grows $500/yr.
 _SOLO_401K_TOTAL_LIMIT = 70_000
@@ -189,9 +190,6 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
                 available = accts.spouse_401k_pretax + accts.spouse_trad_ira
             conversion_amount = min(inputs.roth_conversion.annual_amount, max(0.0, available))
 
-        # Conversion tax is deducted from surplus (not real income — just a tax event)
-        conversion_tax = conversion_amount * inputs.assumptions.effective_tax_rate
-
         # ── 5. TAX CALCULATION ───────────────────────────────────────────────────
 
         # Gross taxable = W2 (after pre-tax 401k) + SP (after solo pre-tax deductions) + SEPP + RMDs
@@ -203,7 +201,18 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
             sepp_payment +
             user_rmd + spouse_rmd
         )
-        taxes_on_income = max(0.0, gross_taxable) * inputs.assumptions.effective_tax_rate
+        taxes_on_income = compute_federal_tax(gross_taxable)
+
+        # Roth conversion tax = marginal cost of adding conversion to ordinary income
+        if conversion_amount > 0:
+            conversion_tax = (
+                compute_federal_tax(gross_taxable + conversion_amount)
+                - taxes_on_income
+            )
+        else:
+            conversion_tax = 0.0
+
+        # Conversion tax is deducted from surplus (not real income — just a tax event)
         taxes = taxes_on_income + conversion_tax
         net_taxable = gross_taxable - taxes_on_income
         total_net_income = net_taxable + rental_cf
@@ -426,6 +435,8 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
             accessible_roth_seasoned=accessible_roth_seasoned,
             user_rmd=user_rmd,
             spouse_rmd=spouse_rmd,
+            marginal_tax_rate=marginal_rate(gross_taxable),
+            effective_tax_rate=effective_rate(gross_taxable),
         ))
 
     return snapshots

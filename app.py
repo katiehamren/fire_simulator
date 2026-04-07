@@ -4,7 +4,7 @@ Early Retirement Simulator — Streamlit web app.
 Run with:  streamlit run app.py
 
 Key simplifications in v1:
-- Flat effective tax rate on W2 + sole prop income
+- Federal tax from progressive MFJ brackets (config) on W2 + sole prop income
 - Roth IRA fully accessible for withdrawals (real rule: contributions only pre-59.5)
 - No Social Security modeling
 - No Roth conversion ladder optimization (Phase 2)
@@ -30,6 +30,7 @@ from engine.models import (
     RothConversionPlan, SEPPPlan, SpendingOverride,
 )
 from engine.simulator import run_simulation, _compute_w2_401k
+from engine.tax_calc import compute_federal_tax
 from scenarios.defaults import PRESETS
 from chatbot.ui import render_chat_panel
 
@@ -48,7 +49,7 @@ SCENARIO_KEYS = [
     "brok", "hsa", "cash_bal",
     "uirac", "sirac", "brokc",
     "solo_ee", "solo_ee_type", "solo_er_pct", "solo_er_type",
-    "taxr", "mret_preset", "mret", "inf", "spend", "hccost",
+    "mret_preset", "mret", "inf", "spend", "hccost",
     "spend_override_enabled", "spend_override_year", "spend_override_pct",
     "rc_enabled", "rc_start", "rc_end", "rc_amount", "rc_source",
     "sepp_enabled", "sepp_start", "sepp_account", "sepp_rate",
@@ -112,8 +113,12 @@ def delete_saved(name: str) -> None:
 
 
 def apply_inputs(inputs: dict) -> None:
-    """Load a dict of widget key→value into session state and rerun."""
-    st.session_state.update(inputs)
+    """Load a dict of widget key→value into session state and rerun.
+
+    Only keys in SCENARIO_KEYS are applied so obsolete keys (e.g. legacy taxr)
+    in older saved JSON are ignored.
+    """
+    st.session_state.update({k: v for k, v in inputs.items() if k in SCENARIO_KEYS})
     st.rerun()
 
 
@@ -158,7 +163,7 @@ def validate_inputs(inputs: SimInputs) -> list[tuple[str, str]]:
 
     _gross_tax_0 = ((_k_w2_0 - _k401_0) + (_h_w2_0 - _h401_0)
                     + _sp_0 - _ee_pretax - _er_pretax)
-    _taxes_0 = max(0.0, _gross_tax_0) * inputs.assumptions.effective_tax_rate
+    _taxes_0 = compute_federal_tax(_gross_tax_0)
     _rent_noi_0 = (inputs.rental.monthly_gross_rent * 12
                    * (1 - inputs.rental.vacancy_rate - inputs.rental.expense_ratio))
     _net_inc_0 = (_gross_tax_0 - _taxes_0) + _rent_noi_0
@@ -512,10 +517,10 @@ def build_inputs() -> SimInputs:
 
         # ── ASSUMPTIONS ──
         with st.expander("📈 Assumptions"):
-            tax_rate   = st.slider(
-                "Effective income tax rate", 0.0, 40.0, 22.0, 1.0, format="%.0f%%", key="taxr",
-                help="Flat rate applied to W2 + sole prop gross income. Adjust lower for bridge years."
-            ) / 100
+            st.caption(
+                "Federal tax: 2025 MFJ progressive brackets with $31,500 standard deduction. "
+                "Edit `engine/tax_brackets.json` to update brackets."
+            )
             ret_preset = st.radio(
                 "Return rate preset",
                 ["Conservative (5%)", "Base (7%)", "Optimistic (9%)", "Custom"],
@@ -672,7 +677,7 @@ def build_inputs() -> SimInputs:
             user_solo_401k_er_pct=_solo_er_frac,
             user_solo_401k_er_type=solo_er_type,
         ),
-        assumptions=Assumptions(tax_rate, mkt_return, inflation, spending, hc_cost),
+        assumptions=Assumptions(mkt_return, inflation, spending, hc_cost),
         end_year=end_year,
         roth_conversion=RothConversionPlan(
             enabled=rc_enabled,
@@ -888,10 +893,9 @@ def render_income_cashflow(df: pd.DataFrame, inputs: SimInputs):
     st.plotly_chart(fig, width="stretch")
 
     st.info(
-        "ℹ️ **Tax note:** W2 and sole prop income shown as gross. "
-        f"A flat {inputs.assumptions.effective_tax_rate:.0%} effective tax rate is applied in cash flow calculations. "
-        "Rental cash flow is NOI (effective rent minus operating expenses). "
-        "Healthcare cost appears only in years when neither person has a W2 job."
+        "ℹ️ **Tax note:** Income is taxed using 2025 federal progressive brackets (MFJ) "
+        "with the standard deduction applied. Rental cash flow is NOI (not subject to "
+        "income tax in this model). Healthcare cost appears only when neither person has a W2."
     )
 
 
@@ -1385,31 +1389,36 @@ def render_bridge_strategies(df: pd.DataFrame, inputs: SimInputs):
         # Conversion tax impact table
         if not conv_df.empty:
             st.subheader("Year-by-Year Conversion Detail")
-            tax_rate = inputs.assumptions.effective_tax_rate
             conv_table = conv_df[["year", "roth_conversion_amount", "accessible_roth_seasoned"]].copy()
-            # Conversion tax cost = only the incremental taxes triggered by the conversion
-            conv_table["conversion_tax"] = conv_table["roth_conversion_amount"] * tax_rate
+            _gross_by_year = df.set_index("year")["gross_taxable_income"]
+            conv_table["conversion_tax"] = conv_table.apply(
+                lambda row: compute_federal_tax(
+                    _gross_by_year[row["year"]] + row["roth_conversion_amount"]
+                )
+                - compute_federal_tax(_gross_by_year[row["year"]]),
+                axis=1,
+            )
             # Net cash cost = tax you actually pay out-of-pocket (principal goes into Roth, not lost)
             conv_table["net_cash_cost"] = conv_table["conversion_tax"]
             conv_table = conv_table[["year", "roth_conversion_amount", "conversion_tax",
                                      "net_cash_cost", "accessible_roth_seasoned"]]
             conv_table.columns = [
                 "Year", "Converted to Roth ($)",
-                f"Conversion Tax ({tax_rate:.0%})",
+                "Conversion Tax (marginal)",
                 "Net Cash Cost ($)", "Cumul. Seasoned Roth ($)",
             ]
             st.dataframe(
                 conv_table.style.format({
                     "Converted to Roth ($)":         "${:,.0f}",
-                    f"Conversion Tax ({tax_rate:.0%})": "${:,.0f}",
+                    "Conversion Tax (marginal)":     "${:,.0f}",
                     "Net Cash Cost ($)":              "${:,.0f}",
                     "Cumul. Seasoned Roth ($)":       "${:,.0f}",
                 }),
                 width="stretch", hide_index=True,
             )
             st.caption(
-                f"**Conversion Tax** = converted amount × {tax_rate:.0%} effective rate — "
-                "the only extra tax triggered by the conversion. "
+                "**Conversion Tax** is the marginal tax on the conversion amount — "
+                "the incremental federal income tax from adding the conversion to ordinary income. "
                 "This comes from your cash surplus for that year. "
                 "The converted principal moves into Roth intact and is not lost. "
                 "**Cumulative Seasoned Roth** shows how much converted principal is accessible "
