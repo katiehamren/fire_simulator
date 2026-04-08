@@ -52,23 +52,19 @@ def _expand_scenarios() -> None:
 
         # Save current
         st.markdown("**Save current inputs**")
-        if st.session_state.pop("_clear_save_name", False):
-            st.session_state["save_name_input"] = ""
         save_name = st.text_input(
             "Scenario name", placeholder='e.g. "User retires 2027, conservative"',
             label_visibility="collapsed", key="save_name_input",
         )
-        if msg := st.session_state.pop("_save_success_msg", ""):
-            st.success(msg)
+        if st.session_state.get("_save_success_msg"):
+            st.success(st.session_state.pop("_save_success_msg"))
         if st.button(
             "Save", key="btn_save", width="stretch",
             disabled=not (save_name or "").strip(),
         ):
             name = save_name.strip()
             save_scenario(name)
-            st.session_state["_clear_save_name"] = True
             st.session_state["_save_success_msg"] = f'Saved "{name}"'
-            st.rerun()
 
 
 def build_inputs() -> SimInputs:
