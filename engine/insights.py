@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Optional
 
-from .models import SimInputs, YearSnapshot
+from .models import SimInputs, YearSnapshot, CURRENT_YEAR
 from .simulator import run_simulation
 
 
@@ -36,16 +36,35 @@ def bridge_burn(snapshots: list[YearSnapshot], inputs: SimInputs) -> dict[str, A
     pre_bridge = next((s for s in snapshots if s.year == bridge_start - 1), None)
     at_bridge_end = next((s for s in snapshots if s.year == bridge_end), None)
 
-    liquid_at_start = pre_bridge.total_liquid_non_retirement if pre_bridge else 0.0
-    liquid_at_end = at_bridge_end.total_liquid_non_retirement if at_bridge_end else 0.0
+    r = inputs.assumptions.inflation_rate
+
+    # Deflate nominal balances to today's dollars so the comparison matches
+    # the inflation-adjusted view shown in the graph.
+    def _real(nominal: float, year: int) -> float:
+        return nominal / (1 + r) ** (year - CURRENT_YEAR)
+
+    liquid_at_start_real = _real(
+        pre_bridge.total_liquid_non_retirement if pre_bridge else 0.0,
+        bridge_start - 1,
+    )
+    liquid_at_end_real = _real(
+        at_bridge_end.total_liquid_non_retirement if at_bridge_end else 0.0,
+        bridge_end,
+    )
 
     bridge_snaps = [s for s in snapshots if bridge_start <= s.year < bridge_end]
-    total_deficit = sum(s.net_cashflow for s in bridge_snaps if s.net_cashflow < 0)
-    avg_annual_deficit = total_deficit / max(len(bridge_snaps), 1)
 
-    pct_liquid_consumed = (
-        (liquid_at_start - liquid_at_end) / liquid_at_start * 100
-        if liquid_at_start > 0
+    # Average net cashflow over ALL bridge years in today's dollars.
+    avg_annual_cashflow_real = (
+        sum(_real(s.net_cashflow, s.year) for s in bridge_snaps)
+        / max(len(bridge_snaps), 1)
+    )
+
+    # Net change in real liquid assets: positive = grew, negative = consumed.
+    liquid_net_change_real = liquid_at_end_real - liquid_at_start_real
+    liquid_net_change_pct = (
+        liquid_net_change_real / liquid_at_start_real * 100
+        if liquid_at_start_real > 0
         else 0.0
     )
 
@@ -53,11 +72,11 @@ def bridge_burn(snapshots: list[YearSnapshot], inputs: SimInputs) -> dict[str, A
         "bridge_start": bridge_start,
         "bridge_end": bridge_end,
         "years": bridge_end - bridge_start,
-        "total_deficit": total_deficit,
-        "avg_annual_deficit": avg_annual_deficit,
-        "liquid_at_start": liquid_at_start,
-        "liquid_at_end": liquid_at_end,
-        "pct_liquid_consumed": pct_liquid_consumed,
+        "avg_annual_cashflow": avg_annual_cashflow_real,
+        "liquid_at_start": liquid_at_start_real,
+        "liquid_at_end": liquid_at_end_real,
+        "liquid_net_change": liquid_net_change_real,
+        "liquid_net_change_pct": liquid_net_change_pct,
     }
 
 

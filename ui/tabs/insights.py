@@ -90,12 +90,32 @@ def render_insights(_df: pd.DataFrame, snapshots, inputs: SimInputs):
     c1.metric(
         f"Bridge period ({bb['bridge_start']}–{bb['bridge_end']})",
         f"{bb['years']} years",
+        delta_color="off",
     )
-    c2.metric("Avg annual drawdown", fmt(abs(bb["avg_annual_deficit"])))
-    c3.metric(
-        "Liquid assets consumed",
-        f"{bb['pct_liquid_consumed']:.0f}%",
+
+    avg_cf = bb["avg_annual_cashflow"]
+    c2.metric(
+        "Avg annual net cashflow",
+        fmt(abs(avg_cf)),
+        "surplus/yr" if avg_cf >= 0 else "deficit/yr",
+        delta_color="off" if avg_cf >= 0 else "inverse",
     )
+
+    pct = bb["liquid_net_change_pct"]
+    if pct >= 0:
+        c3.metric(
+            "Liquid assets at bridge end",
+            f"+{pct:.0f}%",
+            f"Grew {fmt(bb['liquid_net_change'])}",
+            delta_color="off",
+        )
+    else:
+        c3.metric(
+            "Liquid assets at bridge end",
+            f"{pct:.0f}%",
+            f"Consumed {fmt(abs(bb['liquid_net_change']))}",
+            delta_color="inverse",
+        )
 
     st.divider()
 

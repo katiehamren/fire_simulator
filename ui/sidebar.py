@@ -322,12 +322,13 @@ def build_inputs() -> SimInputs:
             )
             if spend_override_enabled:
                 _new_spend = spending * (1 + spend_override_pct / 100)
+                # Use \$ to escape dollar signs — Streamlit markdown treats $...$ as LaTeX.
+                _from = f"\\${spending:,.0f}"
+                _to   = f"\\${_new_spend:,.0f}"
+                _verb = "drops" if spend_override_pct < 0 else "rises"
                 st.caption(
-                    f"Spending drops from **{fmt(spending)}/yr** to **{fmt(_new_spend)}/yr** "
-                    f"(today's $) starting **{spend_override_year}**."
-                    if spend_override_pct < 0 else
-                    f"Spending rises from **{fmt(spending)}/yr** to **{fmt(_new_spend)}/yr** "
-                    f"(today's $) starting **{spend_override_year}**."
+                    f"Spending {_verb} from {_from}/yr to {_to}/yr "
+                    f"(today's dollars) starting {spend_override_year}."
                 )
 
         # ── BRIDGE STRATEGIES ──
