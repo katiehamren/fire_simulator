@@ -2,7 +2,9 @@
 Year-by-year retirement simulation engine.
 
 Simplified assumptions:
-- Federal tax uses progressive brackets (MFJ) with standard deduction on W2 + sole prop + SEPP + RMD (not rental)
+- Federal ordinary tax: MFJ brackets (base config year) with thresholds and standard deduction inflated
+  by the plan inflation rate; ordinary income includes taxable rental (NOI minus depreciation), SE tax
+  half-deduction; self-employment tax on sole prop; LTCG on taxable brokerage withdrawals
 - Roth conversion tax is computed separately and deducted from surplus
 - Rental cashflow is included post-expense (NOI - mortgage)
 - Market returns applied uniformly to all investment accounts
@@ -23,7 +25,13 @@ import copy
 from typing import List
 
 from .models import SimInputs, YearSnapshot, CURRENT_YEAR, annual_401k_ee_limit, rmd_factor
-from .tax_calc import compute_federal_tax, effective_rate, marginal_rate
+from .tax_calc import (
+    compute_federal_tax,
+    compute_ltcg_tax,
+    compute_se_tax,
+    effective_rate,
+    marginal_rate,
+)
 # IRS 401(k) combined limit (employee + employer); grows with inflation but we keep this fixed
 # as a conservative ceiling — the employee-only cap (annual_401k_ee_limit) grows $500/yr.
 _SOLO_401K_TOTAL_LIMIT = 70_000
@@ -59,6 +67,8 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
     # Roth conversion vintage tracking: list of (year_converted, amount)
     conversion_history: list[tuple[int, float]] = []
 
+    brokerage_basis = accts.brokerage * inputs.assumptions.brokerage_cost_basis_pct
+
     for year in range(CURRENT_YEAR, inputs.end_year + 1):
         y = year - CURRENT_YEAR  # years elapsed since simulation start
         user_age = year - inputs.user.birth_year
@@ -93,6 +103,11 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
         effective_gross = annual_gross_rent * (1 - inputs.rental.vacancy_rate)
         operating_expenses = annual_gross_rent * inputs.rental.expense_ratio
         rental_cf = effective_gross - operating_expenses
+
+        annual_depreciation = (
+            (inputs.rental.property_value * (1.0 - inputs.rental.land_value_pct)) / 27.5
+        )
+        rental_taxable = max(0.0, rental_cf - annual_depreciation)
 
         # ── 2. CONTRIBUTIONS (amounts only — accounts updated later) ─────────────
 
@@ -192,30 +207,34 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
 
         # ── 5. TAX CALCULATION ───────────────────────────────────────────────────
 
-        # Gross taxable = W2 (after pre-tax 401k) + SP (after solo pre-tax deductions) + SEPP + RMDs
-        # Only pre-tax solo contributions reduce SE taxable income; Roth contributions do not.
+        infl = inputs.assumptions.inflation_rate
+        se_tax = compute_se_tax(sole_prop, user_w2, year)
+        se_deduction = se_tax / 2.0
+
+        # Gross taxable ordinary income: W2, sole prop, rental (taxable), SEPP, RMDs;
+        # half of SE tax is an above-the-line deduction against ordinary income.
         gross_taxable = (
             (user_w2   - user_401k_contrib) +
             (spouse_w2 - spouse_401k_contrib) +
-            sole_prop - solo_ee_pretax - solo_er_pretax +
+            sole_prop - solo_ee_pretax - solo_er_pretax - se_deduction +
             sepp_payment +
-            user_rmd + spouse_rmd
+            user_rmd + spouse_rmd +
+            rental_taxable
         )
-        taxes_on_income = compute_federal_tax(gross_taxable)
+        taxes_on_income = compute_federal_tax(gross_taxable, year, infl)
 
         # Roth conversion tax = marginal cost of adding conversion to ordinary income
         if conversion_amount > 0:
             conversion_tax = (
-                compute_federal_tax(gross_taxable + conversion_amount)
+                compute_federal_tax(gross_taxable + conversion_amount, year, infl)
                 - taxes_on_income
             )
         else:
             conversion_tax = 0.0
 
-        # Conversion tax is deducted from surplus (not real income — just a tax event)
-        taxes = taxes_on_income + conversion_tax
+        taxes_ord = taxes_on_income + conversion_tax + se_tax
         net_taxable = gross_taxable - taxes_on_income
-        total_net_income = net_taxable + rental_cf
+        total_net_income = net_taxable - se_tax + (rental_cf - rental_taxable)
 
         # ── 6. EXPENSES ──────────────────────────────────────────────────────────
 
@@ -304,6 +323,7 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
         )
         brokerage_contrib = min(inputs.contributions.brokerage, max(0.0, surplus_before_brokerage))
         accts.brokerage += brokerage_contrib
+        brokerage_basis += brokerage_contrib
 
         # ── 8. GROW ALL INVESTMENT ACCOUNTS ──────────────────────────────────────
 
@@ -325,22 +345,32 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
         net_cf = surplus_before_brokerage - brokerage_contrib
         early_withdrawal = 0.0
         plan_solvent = True
+        brokerage_gains_realized = 0.0
+        ltcg_tax_total = 0.0
 
         if net_cf > 0:
             accts.cash += net_cf
         else:
             deficit = -net_cf
 
-            # Draw order: cash → brokerage → Roth IRA → penalty-free retirement → penalized
+            # Draw order: cash → brokerage (incl. LTCG on gains) → Roth IRA → …
 
             draw = min(accts.cash, deficit)
             accts.cash -= draw
             deficit -= draw
 
-            if deficit > 0:
-                draw = min(accts.brokerage, deficit)
-                accts.brokerage -= draw
-                deficit -= draw
+            if deficit > 0 and accts.brokerage > 0:
+                while deficit > 0 and accts.brokerage > 0:
+                    draw = min(accts.brokerage, deficit)
+                    basis_frac = brokerage_basis / accts.brokerage if accts.brokerage > 0 else 0.0
+                    gains_fraction = 1.0 - basis_frac
+                    realized_gains = draw * gains_fraction
+                    ltcg = compute_ltcg_tax(gross_taxable, realized_gains, year, infl)
+                    brokerage_gains_realized += realized_gains
+                    ltcg_tax_total += ltcg
+                    accts.brokerage -= draw
+                    brokerage_basis -= draw * basis_frac
+                    deficit -= draw - ltcg
 
             if deficit > 0:
                 total_roth = accts.user_roth_ira + accts.spouse_roth_ira
@@ -382,6 +412,8 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
             if deficit > 0:
                 plan_solvent = False
 
+        taxes_paid = taxes_ord + ltcg_tax_total
+
         # ── 10. ROTH CONVERSION VINTAGE TRACKING ─────────────────────────────────
 
         # Cumulative seasoned Roth = sum of conversions ≥5 years old (accessible without penalty)
@@ -407,7 +439,7 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
             sole_prop_net=sole_prop,
             rental_cashflow=rental_cf,
             gross_taxable_income=gross_taxable,
-            taxes_paid=taxes,
+            taxes_paid=taxes_paid,
             total_net_income=total_net_income,
             spending=spending,
             healthcare=healthcare,
@@ -435,8 +467,12 @@ def run_simulation(inputs: SimInputs) -> List[YearSnapshot]:
             accessible_roth_seasoned=accessible_roth_seasoned,
             user_rmd=user_rmd,
             spouse_rmd=spouse_rmd,
-            marginal_tax_rate=marginal_rate(gross_taxable),
-            effective_tax_rate=effective_rate(gross_taxable),
+            marginal_tax_rate=marginal_rate(gross_taxable, year, infl),
+            effective_tax_rate=effective_rate(gross_taxable, year, infl),
+            se_tax=se_tax,
+            rental_taxable_income=rental_taxable,
+            brokerage_gains_realized=brokerage_gains_realized,
+            ltcg_tax=ltcg_tax_total,
         ))
 
     return snapshots

@@ -42,7 +42,8 @@ def validate_inputs(inputs: SimInputs) -> list[tuple[str, str]]:
 
     _gross_tax_0 = ((_k_w2_0 - _k401_0) + (_h_w2_0 - _h401_0)
                     + _sp_0 - _ee_pretax - _er_pretax)
-    _taxes_0 = compute_federal_tax(_gross_tax_0)
+    _inf = inputs.assumptions.inflation_rate
+    _taxes_0 = compute_federal_tax(_gross_tax_0, CURRENT_YEAR, _inf)
     _rent_noi_0 = (inputs.rental.monthly_gross_rent * 12
                    * (1 - inputs.rental.vacancy_rate - inputs.rental.expense_ratio))
     _net_inc_0 = (_gross_tax_0 - _taxes_0) + _rent_noi_0

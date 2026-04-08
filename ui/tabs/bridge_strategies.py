@@ -110,13 +110,17 @@ def render_bridge_strategies(df: pd.DataFrame, inputs: SimInputs):
             st.subheader("Year-by-Year Conversion Detail")
             conv_table = conv_df[["year", "roth_conversion_amount", "accessible_roth_seasoned"]].copy()
             _gross_by_year = df.set_index("year")["gross_taxable_income"]
-            conv_table["conversion_tax"] = conv_table.apply(
-                lambda row: compute_federal_tax(
-                    _gross_by_year[row["year"]] + row["roth_conversion_amount"]
+            _inf = inputs.assumptions.inflation_rate
+
+            def _conv_tax_row(row):
+                y = int(row["year"])
+                g = _gross_by_year[row["year"]]
+                return (
+                    compute_federal_tax(g + row["roth_conversion_amount"], y, _inf)
+                    - compute_federal_tax(g, y, _inf)
                 )
-                - compute_federal_tax(_gross_by_year[row["year"]]),
-                axis=1,
-            )
+
+            conv_table["conversion_tax"] = conv_table.apply(_conv_tax_row, axis=1)
             # Net cash cost = tax you actually pay out-of-pocket (principal goes into Roth, not lost)
             conv_table["net_cash_cost"] = conv_table["conversion_tax"]
             conv_table = conv_table[["year", "roth_conversion_amount", "conversion_tax",

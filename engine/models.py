@@ -68,6 +68,8 @@ class RentalProperty:
     rent_growth_rate: float   # Annual rent increase rate
     vacancy_rate: float       # Fraction of year vacant, e.g. 0.05
     expense_ratio: float      # OpEx as fraction of gross rent (taxes, insurance, maintenance, mgmt)
+    property_value: float = 0.0   # Current property value (depreciable basis anchor)
+    land_value_pct: float = 0.20  # Land share of value — not depreciable
 
 
 @dataclass
@@ -120,6 +122,7 @@ class Assumptions:
     inflation_rate: float = 0.03              # Annual inflation
     annual_spending_today: float = 90_000.0   # Annual household spending in TODAY's dollars
     annual_healthcare_off_employer: float = 24_000.0  # Full health ins + OOP when not on employer plan
+    brokerage_cost_basis_pct: float = 0.50    # Fraction of brokerage balance that is cost basis (rest = unrealized gain)
 
 
 @dataclass
@@ -196,9 +199,9 @@ class YearSnapshot:
     rental_cashflow: float        # NOI (effective rent minus operating expenses)
 
     # Tax & net income
-    gross_taxable_income: float   # W2 + sole prop + SEPP (rental excluded — separate treatment)
-    taxes_paid: float             # Includes ordinary income tax + Roth conversion tax
-    total_net_income: float       # After-tax W2+SP+SEPP + rental cashflow
+    gross_taxable_income: float   # Ordinary income incl. taxable rental; fed tax uses inflated brackets
+    taxes_paid: float             # Ordinary + conversion + SE + LTCG (federal model)
+    total_net_income: float       # After-tax cash-style income incl. rental NOI net of modeled taxes
 
     # Expenses
     spending: float               # Inflation-adjusted spending
@@ -242,4 +245,9 @@ class YearSnapshot:
 
     # Tax detail (computed from progressive brackets on ordinary gross_taxable_income)
     marginal_tax_rate: float = 0.0
-    effective_tax_rate: float = 0.0  # federal tax on ordinary income / gross_taxable_income
+    effective_tax_rate: float = 0.0  # federal ordinary income tax / gross_taxable_income
+
+    se_tax: float = 0.0
+    rental_taxable_income: float = 0.0
+    brokerage_gains_realized: float = 0.0
+    ltcg_tax: float = 0.0

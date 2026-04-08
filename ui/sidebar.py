@@ -267,12 +267,22 @@ def build_inputs() -> SimInputs:
                 "Expense ratio (% of gross rent)", 5.0, 60.0, 30.0, 5.0, format="%.0f%%", key="rexp",
                 help="Property taxes, insurance, maintenance, management fees — as % of gross rent.",
             ) / 100
+            r_prop_value = st.number_input(
+                "Property value ($, for depreciation)", value=0, step=25_000, key="rpropval",
+                help="Used for 27.5-year straight-line depreciation on the structure (land excluded). "
+                     "Leave 0 to skip depreciation; taxable rental income ≈ NOI.",
+            )
+            r_land_pct = st.slider(
+                "Land value (% of property)", 0.0, 50.0, 20.0, 5.0, format="%.0f%%", key="rland",
+                help="Land is not depreciable; only the building portion is depreciated over 27.5 years.",
+            ) / 100
 
         # ── ASSUMPTIONS ──
         with st.expander("📈 Assumptions"):
             st.caption(
-                "Federal tax: 2025 MFJ progressive brackets with $31,500 standard deduction. "
-                "Edit `engine/tax_brackets.json` to update brackets."
+                "Federal tax: MFJ brackets (base year in tax_brackets.json); thresholds and standard "
+                "deduction inflate with the inflation rate below. Brokerage withdrawals can trigger "
+                "long-term capital gains tax."
             )
             ret_preset = st.radio(
                 "Return rate preset",
@@ -288,6 +298,11 @@ def build_inputs() -> SimInputs:
                 mkt_return = _preset_map[ret_preset] / 100
                 st.caption(f"Using **{mkt_return:.0%}** annual market return")
             inflation  = st.slider("Annual inflation",     1.0,  6.0, 3.0, 0.5, format="%.1f%%", key="inf")  / 100
+            brokerage_basis_pct = st.slider(
+                "Brokerage cost basis (% of balance)", 30.0, 100.0, 50.0, 5.0, format="%.0f%%", key="bbasis",
+                help="Fraction of the taxable account treated as basis (not unrealized gain). "
+                     "Withdrawals realize gains proportionally; LTCG tax applies.",
+            ) / 100
             spending   = st.number_input(
                 "Annual household spending, today's $ ($)", value=90_000, step=5_000, key="spend",
                 help="Does not include healthcare. Will be inflation-adjusted going forward.")
@@ -412,7 +427,7 @@ def build_inputs() -> SimInputs:
         user_w2=W2Income(k_w2, k_raise),
         spouse_w2=W2Income(h_w2, h_raise),
         sole_prop=SolePropIncome(sp_net, sp_growth, int(sp_years)),
-        rental=RentalProperty(r_rent, r_rent_grow, r_vac, r_exp),
+        rental=RentalProperty(r_rent, r_rent_grow, r_vac, r_exp, float(r_prop_value), r_land_pct),
         accounts=AccountBalances(
             k_401k_pre, k_401k_r, k_tira, k_rira,
             h_401k_pre, h_401k_r, h_tira, h_rira,
@@ -431,7 +446,7 @@ def build_inputs() -> SimInputs:
             user_solo_401k_er_pct=_solo_er_frac,
             user_solo_401k_er_type=solo_er_type,
         ),
-        assumptions=Assumptions(mkt_return, inflation, spending, hc_cost),
+        assumptions=Assumptions(mkt_return, inflation, spending, hc_cost, brokerage_basis_pct),
         end_year=end_year,
         roth_conversion=RothConversionPlan(
             enabled=rc_enabled,

@@ -187,6 +187,10 @@ def lifetime_tax(
     drawdown_tax = sum(s.taxes_paid for s in snapshots if s.year >= last_w2)
     total_tax = accum_tax + drawdown_tax
 
+    accum_se = sum(s.se_tax for s in snapshots if s.year < last_w2)
+    drawdown_se = sum(s.se_tax for s in snapshots if s.year >= last_w2)
+    total_ltcg = sum(s.ltcg_tax for s in snapshots)
+
     n_accum = max(sum(1 for s in snapshots if s.year < last_w2), 1)
     n_draw = max(sum(1 for s in snapshots if s.year >= last_w2), 1)
     avg_accum_rate = (
@@ -200,6 +204,10 @@ def lifetime_tax(
         "total_tax": total_tax,
         "accumulation_tax": accum_tax,
         "drawdown_tax": drawdown_tax,
+        "accumulation_se_tax": accum_se,
+        "drawdown_se_tax": drawdown_se,
+        "total_se_tax": accum_se + drawdown_se,
+        "total_ltcg_tax": total_ltcg,
         "avg_accumulation_rate": avg_accum_rate,
         "avg_drawdown_rate": avg_drawdown_rate,
     }

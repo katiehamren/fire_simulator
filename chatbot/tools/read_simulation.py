@@ -6,7 +6,12 @@ from engine.tax_calc import compute_federal_tax
 
 from .utils import bridge_years, filter_years, snap_to_dict
 
-_TAX_METHOD = "2025 MFJ progressive brackets with $31,500 standard deduction"
+_TAX_METHOD = (
+    "MFJ federal ordinary income tax: base year 2025 brackets from tax_brackets.json, "
+    "with bracket thresholds and standard deduction inflated by the plan inflation rate each year; "
+    "self-employment tax on sole prop; taxable rental (NOI minus straight-line depreciation); "
+    "LTCG on brokerage withdrawals (0/15/20% brackets inflated from 2025)"
+)
 
 _VALID_QUERIES = frozenset({
     "summary", "yearly_detail", "rmds", "income_sources",
@@ -107,6 +112,8 @@ def _handle_income_sources(snapshots, inputs, start_year, end_year) -> dict:
             "spouse_w2_gross": s.spouse_w2_gross,
             "sole_prop_net": s.sole_prop_net,
             "rental_cashflow": s.rental_cashflow,
+            "rental_taxable_income": s.rental_taxable_income,
+            "se_tax": s.se_tax,
             "sepp_payment": s.sepp_payment,
             "user_rmd": s.user_rmd,
             "spouse_rmd": s.spouse_rmd,
@@ -206,6 +213,9 @@ def _handle_cashflow(snapshots, inputs, start_year, end_year) -> dict:
             "surplus_or_deficit": "surplus" if s.net_cashflow >= 0 else "deficit",
             "early_withdrawal_amount": s.early_withdrawal_amount,
             "plan_solvent": s.plan_solvent,
+            "se_tax": s.se_tax,
+            "ltcg_tax": s.ltcg_tax,
+            "brokerage_gains_realized": s.brokerage_gains_realized,
         })
     return {
         "data": rows,
@@ -222,8 +232,16 @@ def _handle_roth_ladder(snapshots, inputs, start_year, end_year) -> dict:
     rows = []
     for s in snaps:
         conversion_tax_cost = (
-            compute_federal_tax(s.gross_taxable_income + s.roth_conversion_amount)
-            - compute_federal_tax(s.gross_taxable_income)
+            compute_federal_tax(
+                s.gross_taxable_income + s.roth_conversion_amount,
+                s.year,
+                inputs.assumptions.inflation_rate,
+            )
+            - compute_federal_tax(
+                s.gross_taxable_income,
+                s.year,
+                inputs.assumptions.inflation_rate,
+            )
         )
         rows.append({
             "year": s.year,

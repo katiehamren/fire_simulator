@@ -13,16 +13,25 @@ for person-level fields). Roth conversion `source` and SEPP `account` are the st
 - The engine projects **calendar years** from the current year through an end year, using the household
   inputs set in the sidebar (salaries, retirement dates, accounts, spending, healthcare, market return,
   inflation, optional Roth conversion plan, optional SEPP 72(t) plan).
-- **Tax:** Uses **2025 federal progressive brackets** (MFJ) with a **$31,500 standard deduction**.
-  Ordinary taxable income = W-2 (after pre-tax 401(k)) + sole prop (after pre-tax solo 401(k))
-  + SEPP + RMDs. Rental cash flow is **not** in the ordinary-income bucket. Roth conversion
-  amounts are taxed at the **marginal rate** on top of ordinary income.
+- **Tax (federal model):** Uses **MFJ ordinary income brackets** loaded from the engine config (base
+  year in `tax_brackets.json`). **Bracket thresholds and the standard deduction inflate each year** by
+  the plan’s **inflation rate** (reduces bracket creep in real terms). Ordinary taxable income includes
+  W-2 (after pre-tax 401(k)), sole proprietorship (after pre-tax solo 401(k) deductions), **taxable rental
+  income** (NOI minus straight-line depreciation on the building; land is not depreciated), **SEPP**,
+  **RMDs**, and **half of self-employment tax** as an above-the-line deduction against ordinary income.
+  **Self-employment tax** (Social Security up to the wage base net of W-2 wages already subject to FICA,
+  Medicare, and additional Medicare above $250k MFJ) is modeled on sole prop net income and included in
+  **taxes_paid**. Roth conversion amounts are taxed at the **marginal ordinary rate** on top of other
+  ordinary income. **Long-term capital gains tax** applies when withdrawing from **taxable brokerage**:
+  the model tracks cost basis vs unrealized gain; realized gains use **0% / 15% / 20%** LTCG brackets
+  (base thresholds inflated from 2025). **Not modeled:** NIIT, AMT, state income tax, exact passive
+  activity loss rules.
 - **Spending & healthcare:** Spending grows with inflation. Healthcare is a fixed off-employer annual cost
   (today’s dollars, inflated) when neither spouse has W-2 income; $0 when on employer coverage.
-- **Returns:** Uniform real return on invested accounts; cash earns no return.
-- **Withdrawal order when cash is needed:** cash → brokerage → Roth IRAs (combined) → pre-tax
-  retirement accounts that are penalty-free (age ≥ 59.5) → pre-tax accounts still subject to penalty;
-  early withdrawals from pre-tax while under 59.5 are tracked as **early_withdrawal_amount**.
+- **Returns:** Uniform return on invested accounts; cash earns no return.
+- **Withdrawal order when cash is needed:** cash → brokerage (realizing gains and LTCG tax) → Roth IRAs
+  (combined) → pre-tax retirement accounts that are penalty-free (age ≥ 59.5) → pre-tax accounts still
+  subject to penalty; early withdrawals from pre-tax while under 59.5 are tracked as **early_withdrawal_amount**.
 - **RMDs:** From **pre-tax 401(k) + Traditional IRA** starting at **age 73**, using the IRS Uniform
   Lifetime divisor on prior year-end balances; **Roth 401(k)/Roth IRA** have no RMD for the original owner
   in this model. If SEPP draws from the same person’s pre-tax pool, SEPP counts toward the RMD shortfall.
@@ -38,7 +47,10 @@ for person-level fields). Roth conversion `source` and SEPP `account` are the st
 - **Identities:** year, user_age, spouse_age
 - **Income (gross / cashflow):** user_w2_gross, spouse_w2_gross, sole_prop_net, rental_cashflow
 - **Tax / income:** gross_taxable_income, taxes_paid, total_net_income
-- **Tax detail:** marginal_tax_rate, effective_tax_rate (computed per-year from progressive brackets)
+- **Tax detail:** marginal_tax_rate, effective_tax_rate (ordinary federal income tax / gross_taxable_income);
+  **se_tax** (self-employment tax on sole prop); **rental_taxable_income** (rental ordinary income net of
+  depreciation); **brokerage_gains_realized**, **ltcg_tax** (capital gains realized from brokerage sales and
+  federal LTCG tax thereon)
 - **Expenses:** spending, healthcare, total_expenses
 - **Cashflow:** net_cashflow
 - **Balances (EOY):** user_401k_pretax, user_401k_roth, user_trad_ira, user_roth_ira,
@@ -79,8 +91,8 @@ says otherwise.
 
 ## Contextual disclaimers (only when relevant)
 
-- User asks about **tax brackets / marginal rates** → the sim uses **2025 MFJ federal brackets**;
-  note it does **not** model state taxes, AMT, NIIT, or bracket inflation over time.
+- User asks about **tax brackets / marginal rates** → brackets and standard deduction **inflate with the
+  plan inflation assumption**; the sim is still **federal-only** (no state tax, AMT, NIIT in full detail).
 - **Very late retirement / lifetime income** → note **Social Security is not modeled**.
 - **State tax** → note the sim is **federal-style only**; no state income tax.
 - **ACA, MAGI, premium tax credit cliffs** → note **gross_taxable_income** (and related fields) are a
