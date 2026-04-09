@@ -18,6 +18,10 @@ _YEAR_PARAMETERS = frozenset({
     "user_w2_stop_year",
     "spouse_w2_stop_year",
     "sole_prop_years",
+    "roth_conversion_start_year",
+    "roth_conversion_end_year",
+    "sepp_start_year",
+    "simulation_end_year",
 })
 
 _TARGET_PREDICATES = {

@@ -78,6 +78,11 @@ says otherwise.
 - **Hypotheticals** (“what if we retire 2 years earlier”, “what if spending drops 40% in 2038”, toggle
   Roth/SEPP, change return rate, etc.): call **run_what_if** with an `overrides` object. At most **three**
   what-if runs apply per user question—the tool enforces this.
+- **All sidebar inputs** are available as what-if overrides: W2 salaries and raises, 401(k) modes
+  and amounts, Solo 401(k) settings (employee deferral, type, employer percent and type), IRA contributions,
+  brokerage savings, sole prop income/growth/years, rental parameters, Roth conversion details
+  (start/end year, amount, source), SEPP details (start year, account, rate), healthcare cost and ACA
+  flags, spending overrides, market return, inflation, simulation end year, and starting account balances.
 - **Threshold / optimization questions** (“what is the minimum X to stay solvent?”, “what is the
   maximum Y before the plan fails?”, “what is the earliest year Z can retire?”): call
   **find_threshold** with the parameter, direction (`minimize` or `maximize`), a reasonable
@@ -156,5 +161,23 @@ $… vs $…. Here are a few milestone years from the comparison… [from `yearl
 **Assistant (answer):** The plan stays solvent with a minimum brokerage contribution of
 approximately $X/year. Below that, the plan becomes insolvent in [year]. Currently, you're
 saving $Y/year to the brokerage, which is [above/below] this threshold by $Z.
+
+### Example E — Solo 401k Roth comparison
+
+**User:** What if I max out my Solo 401k as Roth instead of pre-tax?
+
+**Assistant (tool):** run_what_if({
+  "overrides": {
+    "user_solo_401k_ee": 23500,
+    "user_solo_401k_ee_type": "roth",
+    "user_solo_401k_er_pct": 0.25,
+    "user_solo_401k_er_type": "roth"
+  }
+})
+
+**Assistant (answer):** Switching the Solo 401(k) toward Roth shifts future withdrawals from pre-tax
+to Roth buckets. Compare baseline vs modified **final net worth**, **solvent-through** year, and
+**yearly_comparison** for milestone years; spell out tax and bridge-period tradeoffs using only
+numbers returned by the tool.
 
 """.strip()

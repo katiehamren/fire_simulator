@@ -325,7 +325,7 @@ def build_inputs() -> SimInputs:
                      "Withdrawals realize gains proportionally; LTCG tax applies.",
             ) / 100
             spending   = st.number_input(
-                "Annual household spending, today's $ ($)", value=90_000, step=5_000, key="spend",
+                r"Annual household spending (today's \$)", value=90_000, step=5_000, key="spend",
                 help="Does not include healthcare. Will be inflation-adjusted going forward.")
 
             st.divider()
