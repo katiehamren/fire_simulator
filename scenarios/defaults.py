@@ -23,10 +23,13 @@ _BASE = {
     "brok": 100_000, "hsa": 15_000, "cash_bal": 50_000,
     # Contributions (401k auto-maxed; solo 401k off by default)
     "uirac": 7_000, "sirac": 7_000, "brokc": 20_000,
+    "hsa_mode": "dollar", "hsa_yr": 0,
     "solo_ee": 0, "solo_ee_type": "pretax", "solo_er_pct": 0, "solo_er_type": "pretax",
     # Assumptions
     "mret_preset": "Base (7%)", "inf": 3.0,
-    "spend": 90_000, "hccost": 24_000,
+    "spend": 90_000,
+    "hc_mode": "flat", "hc_flat": 24_000,
+    "aca_bench": 0, "aca_arp": True, "aca_oop": 4_000,
 }
 
 PRESETS: dict[str, dict] = {

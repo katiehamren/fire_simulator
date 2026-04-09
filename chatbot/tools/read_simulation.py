@@ -118,6 +118,7 @@ def _handle_income_sources(snapshots, inputs, start_year, end_year) -> dict:
             "user_rmd": s.user_rmd,
             "spouse_rmd": s.spouse_rmd,
             "total_rmd": total_rmd,
+            "magi": s.magi,
             "total_net_income": s.total_net_income,
         })
     return {
@@ -216,13 +217,19 @@ def _handle_cashflow(snapshots, inputs, start_year, end_year) -> dict:
             "se_tax": s.se_tax,
             "ltcg_tax": s.ltcg_tax,
             "brokerage_gains_realized": s.brokerage_gains_realized,
+            "magi": s.magi,
+            "aca_premium": s.aca_premium,
+            "aca_subsidy": s.aca_subsidy,
+            "aca_fpl_pct": s.aca_fpl_pct,
+            "hsa_for_healthcare": s.hsa_for_healthcare,
+            "hsa_contribution": s.hsa_contribution,
         })
     return {
         "data": rows,
         "inputs_context": {
             "annual_spending_today": inputs.assumptions.annual_spending_today,
             "inflation_rate": inputs.assumptions.inflation_rate,
-            "annual_healthcare_off_employer": inputs.assumptions.annual_healthcare_off_employer,
+            "healthcare_mode": inputs.assumptions.healthcare_mode,
         },
     }
 

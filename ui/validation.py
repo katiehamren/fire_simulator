@@ -1,8 +1,9 @@
 """Input validation warnings for the simulator."""
 
-from engine.models import CURRENT_YEAR, SimInputs
+from engine.aca import estimate_aca_premium
+from engine.models import CURRENT_YEAR, SimInputs, annual_hsa_family_limit
 from engine.simulator import _compute_w2_401k
-from engine.tax_calc import compute_federal_tax
+from engine.tax_calc import compute_federal_tax, compute_se_tax
 
 from .formatting import fmt
 
@@ -40,19 +41,53 @@ def validate_inputs(inputs: SimInputs) -> list[tuple[str, str]]:
     _er_pretax = 0.0 if inputs.contributions.user_solo_401k_er_type == "roth" else _er
     _er_roth   = _er if inputs.contributions.user_solo_401k_er_type == "roth" else 0.0
 
-    _gross_tax_0 = ((_k_w2_0 - _k401_0) + (_h_w2_0 - _h401_0)
-                    + _sp_0 - _ee_pretax - _er_pretax)
     _inf = inputs.assumptions.inflation_rate
+    _hsa_0 = 0.0
+    if _k_w2_0 > 0 or _h_w2_0 > 0:
+        _hsa_cap_0 = annual_hsa_family_limit(CURRENT_YEAR, _inf)
+        if inputs.contributions.hsa_mode == "max":
+            _hsa_0 = _hsa_cap_0
+        else:
+            _hsa_0 = min(inputs.contributions.hsa_annual, _hsa_cap_0)
+    _gross_tax_0 = ((_k_w2_0 - _k401_0) + (_h_w2_0 - _h401_0)
+                    + _sp_0 - _ee_pretax - _er_pretax - _hsa_0)
     _taxes_0 = compute_federal_tax(_gross_tax_0, CURRENT_YEAR, _inf)
     _rent_noi_0 = (inputs.rental.monthly_gross_rent * 12
                    * (1 - inputs.rental.vacancy_rate - inputs.rental.expense_ratio))
     _net_inc_0 = (_gross_tax_0 - _taxes_0) + _rent_noi_0
-    _hc_0 = 0.0 if (_k_w2_0 > 0 or _h_w2_0 > 0) else inputs.assumptions.annual_healthcare_off_employer
+    _a = inputs.assumptions
+    if _k_w2_0 > 0 or _h_w2_0 > 0:
+        _hc_0 = 0.0
+    elif _a.healthcare_mode == "flat":
+        _hc_0 = _a.annual_healthcare_flat
+    else:
+        rv = inputs.rental
+        _y0 = CURRENT_YEAR
+        _ag = rv.monthly_gross_rent * 12
+        _eg = _ag * (1.0 - rv.vacancy_rate)
+        _op = _ag * rv.expense_ratio
+        _rcf = _eg - _op
+        _depr = (rv.property_value * (1.0 - rv.land_value_pct)) / 27.5 if rv.property_value > 0 else 0.0
+        _rtax = max(0.0, _rcf - _depr)
+        _se_tax_0 = compute_se_tax(_sp_0, _k_w2_0, _y0)
+        _rough_magi = (
+            (_k_w2_0 - _k401_0) + (_h_w2_0 - _h401_0)
+            + _sp_0 - _ee_pretax - _er_pretax + _rtax - _se_tax_0 / 2.0
+            - _hsa_0
+        )
+        _aca = estimate_aca_premium(
+            magi=_rough_magi,
+            year=_y0,
+            inflation_rate=_inf,
+            benchmark_override=_a.aca_benchmark_override or None,
+            arp_extended=_a.aca_arp_extended,
+        )
+        _hc_0 = _aca["premium"] + _a.aca_additional_oop
     _exp_0 = inputs.assumptions.annual_spending_today + _hc_0
     _k_has_earned_0 = _k_w2_0 > 0 or _sp_0 > 0
     _ira_0 = ((inputs.contributions.user_ira if _k_has_earned_0 else 0.0)
               + (inputs.contributions.spouse_ira if _h_w2_0 > 0 else 0.0))
-    _surplus_0 = _net_inc_0 - _exp_0 - _ira_0 - _ee_roth - _er_roth
+    _surplus_0 = _net_inc_0 - _exp_0 - _ira_0 - _hsa_0 - _ee_roth - _er_roth
 
     if _surplus_0 < 0:
         issues.append(("warning",

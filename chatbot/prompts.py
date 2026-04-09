@@ -26,8 +26,14 @@ for person-level fields). Roth conversion `source` and SEPP `account` are the st
   the model tracks cost basis vs unrealized gain; realized gains use **0% / 15% / 20%** LTCG brackets
   (base thresholds inflated from 2025). **Not modeled:** NIIT, AMT, state income tax, exact passive
   activity loss rules.
-- **Spending & healthcare:** Spending grows with inflation. Healthcare is a fixed off-employer annual cost
-  (today’s dollars, inflated) when neither spouse has W-2 income; $0 when on employer coverage.
+- **Spending & healthcare:** Spending grows with inflation. Healthcare has two modes: **ACA** (default) and
+  **flat**. In ACA mode, premiums are estimated from MAGI using the 2025 ARP-extended applicable percentage
+  table — MAGI includes W-2, sole prop (after SE deduction), rental taxable income, Roth conversions, SEPP,
+  RMDs, and brokerage capital gains; premiums scale from 0% to 8.5% of income depending on %FPL, plus
+  user-configurable out-of-pocket costs. In flat mode, a fixed annual cost (today’s dollars, inflated) is
+  used. Healthcare costs are $0 when either person has W-2 income (employer coverage assumed). **HSA** is
+  drawn first for healthcare expenses (tax-free); the remaining healthcare cost flows into the normal expense
+  total and the regular withdrawal order.
 - **Returns:** Uniform return on invested accounts; cash earns no return.
 - **Withdrawal order when cash is needed:** cash → brokerage (realizing gains and LTCG tax) → Roth IRAs
   (combined) → pre-tax retirement accounts that are penalty-free (age ≥ 59.5) → pre-tax accounts still
@@ -39,8 +45,7 @@ for person-level fields). Roth conversion `source` and SEPP `account` are the st
   **accessible_roth_seasoned** is cumulative converted principal that has aged at least **five years**.
 - **SEPP (72(t)):** Optional fixed annual payment from one person’s pre-tax 401(k)+trad IRA, amortization
   method; taxable income; plan runs until the later of **5 years** or **age 59½** in the model.
-- **Not modeled:** Social Security, state income tax, detailed ACA subsidies/MAGI cliffs, RMD aggregation
-  rules beyond this simplified split.
+- **Not modeled:** Social Security, state income tax, RMD aggregation rules beyond this simplified split.
 
 ## YearSnapshot fields (each simulated year)
 
@@ -51,7 +56,10 @@ for person-level fields). Roth conversion `source` and SEPP `account` are the st
   **se_tax** (self-employment tax on sole prop); **rental_taxable_income** (rental ordinary income net of
   depreciation); **brokerage_gains_realized**, **ltcg_tax** (capital gains realized from brokerage sales and
   federal LTCG tax thereon)
-- **Expenses:** spending, healthcare, total_expenses
+- **Healthcare / MAGI:** magi (Modified Adjusted Gross Income for ACA); aca_premium (after subsidy, 0 if
+  employer plan); aca_subsidy (premium tax credit); aca_fpl_pct (income as % of FPL); hsa_for_healthcare
+  (amount drawn from HSA for medical expenses, tax-free)
+- **Expenses:** spending, healthcare (net of HSA draw), total_expenses
 - **Cashflow:** net_cashflow
 - **Balances (EOY):** user_401k_pretax, user_401k_roth, user_trad_ira, user_roth_ira,
   spouse_401k_pretax, spouse_401k_roth, spouse_trad_ira, spouse_roth_ira, brokerage, hsa, cash
@@ -95,8 +103,9 @@ says otherwise.
   plan inflation assumption**; the sim is still **federal-only** (no state tax, AMT, NIIT in full detail).
 - **Very late retirement / lifetime income** → note **Social Security is not modeled**.
 - **State tax** → note the sim is **federal-style only**; no state income tax.
-- **ACA, MAGI, premium tax credit cliffs** → note **gross_taxable_income** (and related fields) are a
-  **rough proxy**, not real MAGI or enrollment logic.
+- **ACA, MAGI, premium tax credit cliffs** → note the ACA model uses a **simplified national-average
+  benchmark** and the ARP applicable-percentage table; actual marketplace premiums vary by county, age, and
+  tobacco use. The **magi** field is a planning estimate, not an exact IRS MAGI.
 - Do **not** attach these caveats to simple reads (“what are my RMDs?”) unless the user mixes in those topics.
 
 ## Few-shot examples

@@ -18,6 +18,16 @@ def annual_401k_ee_limit(year: int) -> int:
     return _401K_EE_2026 + _401K_EE_ANNUAL_BUMP * max(0, year - CURRENT_YEAR)
 
 
+# HSA — family HDHP max contribution (household planning default).
+_HSA_FAMILY_MAX_2026 = 8_750
+
+
+def annual_hsa_family_limit(year: int, inflation_rate: float) -> float:
+    """Projected max HSA contribution for family HDHP coverage in nominal dollars."""
+    y = max(0, year - CURRENT_YEAR)
+    return _HSA_FAMILY_MAX_2026 * (1 + inflation_rate) ** y
+
+
 # IRS Uniform Lifetime Table (Publication 590-B, updated 2022).
 _RMD_UNIFORM_TABLE: dict[int, float] = {
     73: 26.5, 74: 25.5, 75: 24.6, 76: 23.7, 77: 22.9,
@@ -115,14 +125,23 @@ class AnnualContributions:
     user_solo_401k_er_pct: float = 0.0    # Employer profit-sharing % of net SE income (0.0–0.25)
     user_solo_401k_er_type: str = "pretax" # "pretax" or "roth" (SECURE 2.0 allows Roth employer)
 
+    # HSA — while any household member has W2; "max" = annual IRS family HDHP limit (inflated in-engine)
+    hsa_mode: str = "dollar"   # "max" | "dollar"
+    hsa_annual: float = 0.0   # Fixed $/yr when hsa_mode == "dollar" (capped at family max each year)
+
 
 @dataclass
 class Assumptions:
     market_return_rate: float = 0.07          # Annual investment return
     inflation_rate: float = 0.03              # Annual inflation
     annual_spending_today: float = 90_000.0   # Annual household spending in TODAY's dollars
-    annual_healthcare_off_employer: float = 24_000.0  # Full health ins + OOP when not on employer plan
-    brokerage_cost_basis_pct: float = 0.50    # Fraction of brokerage balance that is cost basis (rest = unrealized gain)
+    # Healthcare
+    healthcare_mode: str = "aca"              # "aca" or "flat"
+    annual_healthcare_flat: float = 24_000.0  # Used when mode == "flat" (backward compat)
+    aca_benchmark_override: float = 0.0       # 0 = use national average; >0 = user's local benchmark
+    aca_arp_extended: bool = True             # Whether ARP premium cap continues post-2025
+    aca_additional_oop: float = 4_000.0       # Out-of-pocket costs beyond premiums
+    brokerage_cost_basis_pct: float = 0.50    # Fraction of brokerage balance that is cost basis
 
 
 @dataclass
@@ -251,3 +270,10 @@ class YearSnapshot:
     rental_taxable_income: float = 0.0
     brokerage_gains_realized: float = 0.0
     ltcg_tax: float = 0.0
+
+    magi: float = 0.0
+    aca_premium: float = 0.0
+    aca_subsidy: float = 0.0
+    aca_fpl_pct: float = 0.0
+    hsa_for_healthcare: float = 0.0
+    hsa_contribution: float = 0.0  # Payroll-style contribution while W2 (reduces taxable income & MAGI)

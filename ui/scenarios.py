@@ -21,9 +21,10 @@ SCENARIO_KEYS = [
     "brok", "hsa", "cash_bal",
     "u401k_mode", "u401k_amt", "u401k_pct",
     "s401k_mode", "s401k_amt", "s401k_pct",
-    "uirac", "sirac", "brokc",
+    "uirac", "sirac", "brokc", "hsa_mode", "hsa_yr",
     "solo_ee", "solo_ee_type", "solo_er_pct", "solo_er_type",
-    "mret_preset", "mret", "inf", "bbasis", "spend", "hccost",
+    "mret_preset", "mret", "inf", "bbasis", "spend",
+    "hc_mode", "hc_flat", "aca_bench", "aca_arp", "aca_oop",
     "spend_override_enabled", "spend_override_year", "spend_override_pct",
     "rc_enabled", "rc_start", "rc_end", "rc_amount", "rc_source",
     "sepp_enabled", "sepp_start", "sepp_account", "sepp_rate",
@@ -90,7 +91,16 @@ def apply_inputs(inputs: dict) -> None:
     """Load a dict of widget key→value into session state and rerun.
 
     Only keys in SCENARIO_KEYS are applied so obsolete keys (e.g. legacy taxr)
-    in older saved JSON are ignored.
+    in older saved JSON are ignored.  Handles migration for scenarios saved
+    before the ACA healthcare model was added.
     """
-    st.session_state.update({k: v for k, v in inputs.items() if k in SCENARIO_KEYS})
+    data = dict(inputs)
+
+    # Migration: old scenarios have "hccost" but no "hc_mode".
+    # Treat them as flat-cost healthcare using the saved hccost value.
+    if "hc_mode" not in data and "hccost" in data:
+        data["hc_mode"] = "flat"
+        data["hc_flat"] = data["hccost"]
+
+    st.session_state.update({k: v for k, v in data.items() if k in SCENARIO_KEYS})
     st.rerun()

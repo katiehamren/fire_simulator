@@ -25,6 +25,9 @@ _WHAT_IF_OVERRIDE_KEYS = frozenset({
     "roth_conversion_amount",
     "sepp_enabled",
     "healthcare_cost",
+    "healthcare_mode",
+    "aca_arp_extended",
+    "aca_additional_oop",
 })
 
 _COMPARE_METRICS = frozenset({
@@ -112,7 +115,14 @@ def _apply_what_if_overrides(inp, overrides: dict) -> None:
     if "sepp_enabled" in o:
         inp.sepp.enabled = bool(o["sepp_enabled"])
     if "healthcare_cost" in o:
-        inp.assumptions.annual_healthcare_off_employer = float(o["healthcare_cost"])
+        inp.assumptions.healthcare_mode = "flat"
+        inp.assumptions.annual_healthcare_flat = float(o["healthcare_cost"])
+    if "healthcare_mode" in o:
+        inp.assumptions.healthcare_mode = str(o["healthcare_mode"])
+    if "aca_arp_extended" in o:
+        inp.assumptions.aca_arp_extended = bool(o["aca_arp_extended"])
+    if "aca_additional_oop" in o:
+        inp.assumptions.aca_additional_oop = float(o["aca_additional_oop"])
 
 
 def _build_yearly_comparison(baseline_snaps, modified_snaps, compare_metric: str):

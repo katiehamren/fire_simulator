@@ -58,6 +58,35 @@ class TestContributions:
         assert s.user_401k_pretax == pytest.approx(100_000 + 23_500)
 
 
+class TestHSAContribution:
+    def test_hsa_funded_while_any_w2(self, default_inputs):
+        default_inputs.contributions.hsa_mode = "dollar"
+        default_inputs.contributions.hsa_annual = 8_000
+        snaps = run_simulation(default_inputs)
+        s = snap_year(snaps, 2026)
+        assert s.hsa_contribution == pytest.approx(8_000)
+        assert s.hsa == pytest.approx(8_000)
+
+    def test_hsa_max_mode_family_cap(self, default_inputs):
+        from engine.models import annual_hsa_family_limit
+
+        default_inputs.contributions.hsa_mode = "max"
+        default_inputs.contributions.hsa_annual = 0.0
+        snaps = run_simulation(default_inputs)
+        s = snap_year(snaps, 2026)
+        cap = annual_hsa_family_limit(2026, default_inputs.assumptions.inflation_rate)
+        assert s.hsa_contribution == pytest.approx(cap)
+
+    def test_hsa_stops_when_no_w2(self, default_inputs):
+        default_inputs.contributions.hsa_mode = "dollar"
+        default_inputs.contributions.hsa_annual = 5_000
+        default_inputs.end_year = 2045
+        snaps = run_simulation(default_inputs)
+        s = next(x for x in snaps if x.year == 2037)
+        assert s.user_w2_gross == 0 and s.spouse_w2_gross == 0
+        assert s.hsa_contribution == 0.0
+
+
 class TestAccountGrowth:
     def test_zero_return_no_growth(self, default_inputs):
         """With 0% return, account growth should be zero."""
@@ -66,7 +95,7 @@ class TestAccountGrowth:
         default_inputs.contributions.spouse_401k_amount = 0
         default_inputs.accounts = AccountBalances(brokerage=100_000)
         default_inputs.assumptions.annual_spending_today = 0
-        default_inputs.assumptions.annual_healthcare_off_employer = 0
+        default_inputs.assumptions.annual_healthcare_flat = 0
         snaps = run_simulation(default_inputs)
         s = snap_year(snaps, 2026)
         assert s.brokerage >= 100_000
@@ -75,7 +104,7 @@ class TestAccountGrowth:
         default_inputs.assumptions.market_return_rate = 0.10
         default_inputs.accounts = AccountBalances(brokerage=100_000)
         default_inputs.assumptions.annual_spending_today = 0
-        default_inputs.assumptions.annual_healthcare_off_employer = 0
+        default_inputs.assumptions.annual_healthcare_flat = 0
         default_inputs.contributions = AnnualContributions()
         snaps = run_simulation(default_inputs)
         s = snap_year(snaps, 2026)

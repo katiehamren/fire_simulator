@@ -9,6 +9,7 @@ from engine.models import (
     CURRENT_YEAR, PersonInfo, W2Income, SolePropIncome, RentalProperty,
     AccountBalances, AnnualContributions, Assumptions, SimInputs,
     RothConversionPlan, SEPPPlan, SpendingOverride,
+    annual_hsa_family_limit,
 )
 from scenarios.defaults import PRESETS
 
@@ -204,6 +205,30 @@ def build_inputs() -> SimInputs:
             brok_c = st.number_input("Brokerage/yr ($)", value=20_000, step=5_000, key="brokc",
                                       help="Amount to save in taxable brokerage if there is surplus income.")
 
+            st.divider()
+            _hsa_lim_yr = int(annual_hsa_family_limit(CURRENT_YEAR, 0.0))
+            _HSA_MODE_LABELS = {
+                "max":     f"Max out (IRS family limit — \\${_hsa_lim_yr:,} in {CURRENT_YEAR})",
+                "dollar":  "Fixed $ amount",
+            }
+            st.markdown("**HSA** *(joint account; active while at least one W2)*")
+            st.caption(
+                "Projected family HDHP max grows with your **plan inflation** rate in later years. "
+                "Like pre-tax 401(k), reduces ordinary income and MAGI; funded from surplus."
+            )
+            hsa_mode = st.radio(
+                "HSA contribution mode", ["max", "dollar"],
+                index=1,
+                format_func=lambda k: _HSA_MODE_LABELS[k],
+                horizontal=True, key="hsa_mode",
+            )
+            hsa_yr = float(st.number_input(
+                "HSA amount/yr ($)",
+                value=0, step=500, min_value=0, key="hsa_yr",
+                disabled=(hsa_mode != "dollar"),
+                help="Used in **Fixed $ amount** mode. Capped at the IRS family HDHP max each year while a W2 is active.",
+            ))
+
         # ── SOLE PROP ──
         with st.expander("🏢 Sole Proprietorship", expanded=False):
             st.markdown("**Income**")
@@ -302,11 +327,43 @@ def build_inputs() -> SimInputs:
             spending   = st.number_input(
                 "Annual household spending, today's $ ($)", value=90_000, step=5_000, key="spend",
                 help="Does not include healthcare. Will be inflation-adjusted going forward.")
-            hc_cost    = st.number_input(
-                "Healthcare cost when not on employer plan ($/yr)", value=24_000, step=1_000, key="hccost",
-                help="Full health insurance premiums + estimated out-of-pocket. "
-                     "Applies in years when neither person has a W2 job. "
-                     "Heavily influenced by MAGI — tune this to your ACA scenario.")
+
+            st.divider()
+            st.markdown("**Healthcare**")
+            hc_mode = st.radio(
+                "Healthcare cost model", ["aca", "flat"],
+                format_func=lambda x: "ACA subsidy model (recommended)" if x == "aca" else "Flat annual cost",
+                horizontal=True, key="hc_mode",
+                help="ACA model estimates premiums based on your projected MAGI each year. "
+                     "Flat mode uses a fixed annual cost (inflation-adjusted)."
+            )
+
+            if hc_mode == "flat":
+                hc_flat = st.number_input(
+                    "Annual healthcare cost ($/yr)", value=24_000, step=1_000, key="hc_flat",
+                    help="Full health insurance premiums + estimated out-of-pocket. "
+                         "Applies in years when neither person has a W2 job. Inflation-adjusted.",
+                )
+                aca_benchmark = 0
+                aca_arp = True
+                aca_oop = 4_000
+            else:
+                hc_flat = 24_000
+                aca_benchmark = st.number_input(
+                    "Local benchmark Silver plan cost ($/yr, 0=national avg)",
+                    value=0, step=1_000, key="aca_bench",
+                    help="Annual cost of the second-lowest-cost Silver plan in your area for your ages. "
+                         "Check healthcare.gov for your local benchmark. 0 uses a $28,000 national average."
+                )
+                aca_arp = st.checkbox(
+                    "ARP premium cap continues", value=True, key="aca_arp",
+                    help="The American Rescue Plan capped premiums at 8.5% of income for all income levels. "
+                         "If this expires, the 400% FPL cliff returns — no subsidies above ~$80k MAGI."
+                )
+                aca_oop = st.number_input(
+                    "Additional out-of-pocket ($/yr)", value=4_000, step=500, key="aca_oop",
+                    help="Copays, deductibles, prescriptions beyond premiums."
+                )
 
             st.divider()
             st.markdown("**Spending change**")
@@ -437,12 +494,24 @@ def build_inputs() -> SimInputs:
             spouse_401k_amount=s_401k_amount,
             spouse_401k_pct=s_401k_pct,
             user_ira=k_ira_c, spouse_ira=h_ira_c, brokerage=brok_c,
+            hsa_mode=hsa_mode,
+            hsa_annual=hsa_yr if hsa_mode == "dollar" else 0.0,
             user_solo_401k_ee=float(solo_ee),
             user_solo_401k_ee_type=solo_ee_type,
             user_solo_401k_er_pct=_solo_er_frac,
             user_solo_401k_er_type=solo_er_type,
         ),
-        assumptions=Assumptions(mkt_return, inflation, spending, hc_cost, brokerage_basis_pct),
+        assumptions=Assumptions(
+            market_return_rate=mkt_return,
+            inflation_rate=inflation,
+            annual_spending_today=spending,
+            healthcare_mode=hc_mode,
+            annual_healthcare_flat=float(hc_flat),
+            aca_benchmark_override=float(aca_benchmark),
+            aca_arp_extended=aca_arp,
+            aca_additional_oop=float(aca_oop),
+            brokerage_cost_basis_pct=brokerage_basis_pct,
+        ),
         end_year=end_year,
         roth_conversion=RothConversionPlan(
             enabled=rc_enabled,

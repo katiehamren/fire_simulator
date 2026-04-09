@@ -45,7 +45,8 @@ def default_inputs() -> SimInputs:
             market_return_rate=0.0,
             inflation_rate=0.0,
             annual_spending_today=80_000,
-            annual_healthcare_off_employer=20_000,
+            healthcare_mode="flat",
+            annual_healthcare_flat=20_000,
         ),
         end_year=2040,
     )

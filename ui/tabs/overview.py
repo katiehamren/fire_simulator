@@ -124,6 +124,73 @@ def render_overview(df: pd.DataFrame, inputs: SimInputs):
     )
     st.plotly_chart(fig, width="stretch")
 
+    # Healthcare / MAGI chart (only meaningful when off employer plans)
+    off_employer = df[~df["on_employer_healthcare"]]
+    if not off_employer.empty and inputs.assumptions.healthcare_mode == "aca":
+        st.subheader("Healthcare: MAGI & ACA Premiums")
+
+        fig_hc = go.Figure()
+
+        fig_hc.add_trace(go.Bar(
+            x=off_employer["year"],
+            y=off_employer["aca_subsidy"],
+            name="ACA Subsidy (PTC)",
+            marker_color="#16a34a",
+            opacity=0.7,
+        ))
+        fig_hc.add_trace(go.Bar(
+            x=off_employer["year"],
+            y=off_employer["aca_premium"],
+            name="Premium You Pay",
+            marker_color="#ef4444",
+            opacity=0.7,
+        ))
+        fig_hc.add_trace(go.Scatter(
+            x=off_employer["year"],
+            y=off_employer["magi"],
+            name="MAGI",
+            yaxis="y2",
+            line=dict(color="#2563eb", width=2),
+        ))
+
+        # 400% FPL reference line
+        fpl_2025 = 20_440
+        fpl_growth = 0.02
+        fpl_400 = [
+            fpl_2025 * (1 + fpl_growth) ** max(0, yr - 2025) * 4
+            for yr in off_employer["year"]
+        ]
+        fig_hc.add_trace(go.Scatter(
+            x=off_employer["year"],
+            y=fpl_400,
+            name="400% FPL",
+            yaxis="y2",
+            line=dict(color="#f59e0b", width=1.5, dash="dash"),
+        ))
+
+        fig_hc.update_layout(
+            barmode="stack",
+            xaxis_title="Year",
+            yaxis=dict(title="Annual Cost ($)", tickformat="$,.0f"),
+            yaxis2=dict(
+                title="MAGI ($)", tickformat="$,.0f",
+                overlaying="y", side="right",
+            ),
+            height=380,
+            legend=dict(orientation="h", y=-0.25),
+            margin=dict(t=30),
+        )
+        st.plotly_chart(fig_hc, width="stretch")
+
+        hsa_total = off_employer["hsa_for_healthcare"].sum()
+        if hsa_total > 0:
+            st.caption(
+                f"HSA covered **{fmt(hsa_total)}** in healthcare costs over "
+                f"{len(off_employer)} off-employer years (tax-free)."
+            )
+
+        st.divider()
+
     # Warnings
     early = df[df["early_withdrawal_amount"] > 0]
     if not early.empty:
