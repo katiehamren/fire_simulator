@@ -1,12 +1,15 @@
 # --- Secrets & credentials ---
 .env
 .env.*
+!.env.example
 *.key
 secrets.toml
 .streamlit/secrets.toml
 
 # --- Personal / saved user data ---
-saved_scenarios/
+# Keep empty folder via .gitkeep; ignore *.json scenario files.
+saved_scenarios/*
+!saved_scenarios/.gitkeep
 
 # --- Python ---
 __pycache__/
