@@ -124,16 +124,17 @@ def build_contribution_amounts(inputs: SimInputs, year: int, inc: YearIncome) ->
 
     solo_ee_pretax = solo_ee_roth = solo_er_pretax = solo_er_roth = 0.0
     solo_active = y < inputs.sole_prop.years_active and inc.sole_prop > 0
-    if solo_active and year >= inputs.user.w2_stop_year:
-        ee = min(inputs.contributions.user_solo_401k_ee, ee_limit, inc.sole_prop)
-    else:
-        ee = 0.0
     if solo_active:
+        # IRS employee elective deferral limit is shared across all 401(k) plans.
+        # Subtract whatever was already used by the W2 plan to get remaining room.
+        remaining_ee_room = max(0.0, ee_limit - user_401k_contrib)
+        ee = min(inputs.contributions.user_solo_401k_ee, remaining_ee_room, inc.sole_prop)
         er = min(
             inputs.contributions.user_solo_401k_er_pct * inc.sole_prop,
             max(0.0, SOLO_401K_TOTAL_LIMIT - ee),
         )
     else:
+        ee = 0.0
         er = 0.0
     if ee > 0:
         if inputs.contributions.user_solo_401k_ee_type == "roth":
