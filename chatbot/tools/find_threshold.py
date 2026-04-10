@@ -38,6 +38,7 @@ def find_threshold(
     hi: float,
     tolerance: float = 500.0,
     target: str = "plan_stays_solvent",
+    context_overrides: dict | None = None,
     *,
     max_iterations: int = 30,
 ) -> dict:
@@ -60,7 +61,8 @@ def find_threshold(
     while iteration_count < max_iterations and abs(hi - lo) >= effective_tolerance:
         mid = (lo + hi) / 2
         inp = deepcopy(st.session_state["sim_inputs"])
-        _apply_what_if_overrides(inp, {parameter: mid})
+        combined = {**(context_overrides or {}), parameter: mid}
+        _apply_what_if_overrides(inp, combined)
         snaps = run_simulation(inp)
         passes = _TARGET_PREDICATES[target](snaps)
         if direction == "minimize":
@@ -84,12 +86,14 @@ def find_threshold(
         threshold = round((lo + hi) / 2, 2)
 
     inp = deepcopy(st.session_state["sim_inputs"])
-    _apply_what_if_overrides(inp, {parameter: threshold})
+    combined_final = {**(context_overrides or {}), parameter: threshold}
+    _apply_what_if_overrides(inp, combined_final)
     snaps = run_simulation(inp)
     result_at_threshold = _scenario_metrics(snaps)
 
     return {
         "parameter": parameter,
+        "context_overrides": context_overrides or {},
         "direction": direction,
         "target": target,
         "threshold": threshold,
@@ -146,6 +150,19 @@ FIND_THRESHOLD_SCHEMA = {
                     "description": (
                         "Predicate the threshold must satisfy. Default: plan_stays_solvent."
                     ),
+                },
+                "context_overrides": {
+                    "type": "object",
+                    "description": (
+                        "Fixed overrides applied to every simulation during the bisection search. "
+                        "Use this when the question requires holding additional inputs constant while "
+                        "searching over 'parameter'. For example, to find the minimum sole_prop_net "
+                        "assuming spouse also stops W2 in 2029, pass "
+                        "context_overrides: {\"spouse_w2_stop_year\": 2029}. "
+                        "All keys valid for run_what_if overrides are accepted here. "
+                        "If a key duplicates 'parameter', the search value for 'parameter' wins."
+                    ),
+                    "additionalProperties": True,
                 },
             },
             "required": ["parameter", "direction", "lo", "hi"],

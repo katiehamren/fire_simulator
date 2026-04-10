@@ -72,6 +72,8 @@ def _dispatch_tool(
             args.get("hi", 0),
             args.get("tolerance", 500.0),
             args.get("target", "plan_stays_solvent"),
+            args.get("context_overrides"),
+            max_iterations=args.get("max_iterations", 30),
         )
     if name == "web_search":
         return web_search(

@@ -88,6 +88,9 @@ says otherwise.
   **find_threshold** with the parameter, direction (`minimize` or `maximize`), a reasonable
   search range `[lo, hi]`, and a target predicate. Do **not** attempt manual bisection with
   multiple **run_what_if** calls — **find_threshold** does this in one tool call.
+- When the question fixes **other** inputs while searching one parameter (e.g. “minimum sole prop
+  income if spouse also stops W2 in 2029”), pass **`context_overrides`** with those fixed values so
+  bisection does not run against an unstated baseline.
 - **External / current rules not in the model** (e.g. official IRS AFR tables, published contribution limits,
   statutory thresholds): call **web_search**. Government-domain results are pre-filtered; cite titles/URLs.
 - Do **not** use web_search for numbers that exist only inside the simulation—use read_simulation or
