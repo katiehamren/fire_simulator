@@ -13,7 +13,7 @@ from .what_if import (
     _scenario_metrics,
 )
 
-# Parameters measured in whole calendar years; bisection needs tolerance=1, not 500.
+# Parameters measured in whole calendar years; bisection needs tolerance=1
 _YEAR_PARAMETERS = frozenset({
     "spending_change_year",
     "user_w2_stop_year",
@@ -26,37 +26,23 @@ _YEAR_PARAMETERS = frozenset({
 })
 
 _TARGET_PREDICATES = {
-    "plan_stays_solvent": lambda snaps: all(s.plan_solvent for s in snaps),
     "no_early_withdrawals": lambda snaps: all(s.early_withdrawal_amount <= 0 for s in snaps),
     "final_net_worth_positive": lambda snaps: snaps[-1].total_net_worth > 0 if snaps else False,
-    # Liquid assets (brokerage + cash + HSA) stay positive only through the bridge period —
-    # years before the younger person reaches age 60 (proxy for 59½ penalty-free access).
-    # After age 60, retirement accounts open and the plan can draw from them freely.
-    # USE THIS as the default for "what minimum income lets both people stop W2?" questions.
-    # Gives a lower, more meaningful threshold than liquid_assets_always_positive because it
-    # does not penalize late-retirement years when RMDs naturally refill liquid assets.
     "liquid_assets_through_bridge": lambda snaps: all(
         s.total_liquid_non_retirement > 0
         for s in snaps
         if min(s.user_age, s.spouse_age) < 60
     ),
-    # Liquid assets (brokerage + cash + HSA) never hit zero across ALL simulation years.
-    # Checks the entire run including 73+ RMD years where liquid assets are naturally
-    # replenished. Usually converges to the same high number as no_early_withdrawals.
-    # Avoid for W2-stop questions; prefer liquid_assets_through_bridge instead.
-    "liquid_assets_always_positive": lambda snaps: all(
-        s.total_liquid_non_retirement > 0 for s in snaps
-    ),
-    # Weaker variant: only checks that liquid assets are positive at the END of the simulation.
-    # Use when early drawdown is acceptable but full depletion by plan end is not.
     "final_liquid_assets_positive": lambda snaps: (
         snaps[-1].total_liquid_non_retirement > 0 if snaps else False
     ),
 }
 
+# Targets that require an extra numeric parameter (not expressible as a plain lambda)
 _FI_TARGETS = frozenset({"fi_crossover_exists", "fi_crossover_by_year"})
+_PARAMETERIZED_TARGETS = frozenset({"final_net_worth_at_least"})
 
-_VALID_TARGETS = frozenset(_TARGET_PREDICATES.keys()) | _FI_TARGETS
+_VALID_TARGETS = frozenset(_TARGET_PREDICATES.keys()) | _FI_TARGETS | _PARAMETERIZED_TARGETS
 
 
 def find_threshold(
@@ -65,15 +51,17 @@ def find_threshold(
     lo: float,
     hi: float,
     tolerance: float = 500.0,
-    target: str = "plan_stays_solvent",
+    target: str = "liquid_assets_through_bridge",
     target_fi_year: int | None = None,
     context_overrides: dict | None = None,
+    target_net_worth: float | None = None,
     *,
     max_iterations: int = 30,
 ) -> dict:
     """
     Perform a bisection search to find the threshold value of a single simulation parameter
-    that meets a specified target predicate (such as solvency or net worth) using what-if overrides.
+    that meets a specified target predicate (such as liquid bridge coverage or net worth) using
+    what-if overrides.
 
     Args:
         parameter (str): The simulation parameter to adjust.
@@ -81,9 +69,12 @@ def find_threshold(
         lo (float): Lower bound of the parameter.
         hi (float): Upper bound of the parameter.
         tolerance (float, optional): Stopping tolerance for search. Defaults to 500.0.
-        target (str, optional): Target predicate to evaluate (e.g., "plan_stays_solvent").
+        target (str, optional): Target predicate to evaluate. Defaults to
+            "liquid_assets_through_bridge".
         target_fi_year (int, optional): Calendar year ceiling for fi_crossover_by_year target.
         context_overrides (dict, optional): Additional simulation overrides.
+        target_net_worth (float, optional): Minimum net worth required at simulation end when
+            target is "final_net_worth_at_least".
         max_iterations (int, optional): Maximum search iterations. Defaults to 30.
 
     Returns:
@@ -97,6 +88,8 @@ def find_threshold(
         return {"error": f"Unsupported target: {target}"}
     if target == "fi_crossover_by_year" and target_fi_year is None:
         return {"error": "target_fi_year is required when target is fi_crossover_by_year"}
+    if target == "final_net_worth_at_least" and target_net_worth is None:
+        return {"error": "target_net_worth is required when target is final_net_worth_at_least"}
     if "sim_snapshots" not in st.session_state or "sim_inputs" not in st.session_state:
         return {"error": "No simulation data found. Run the simulation first."}
 
@@ -122,6 +115,8 @@ def find_threshold(
                 passes = fi is not None
             else:
                 passes = fi is not None and fi["year"] <= target_fi_year
+        elif target == "final_net_worth_at_least":
+            passes = (snaps[-1].total_net_worth >= target_net_worth) if snaps else False
         else:
             passes = _TARGET_PREDICATES[target](snaps)
         if direction == "minimize":
@@ -164,6 +159,8 @@ def find_threshold(
     }
     if target_fi_year is not None:
         out["target_fi_year"] = target_fi_year
+    if target_net_worth is not None:
+        out["target_net_worth"] = target_net_worth
     return out
 
 
@@ -175,7 +172,7 @@ FIND_THRESHOLD_SCHEMA = {
             "Find the minimum or maximum value of a single simulation parameter "
             "that satisfies a solvency, FI crossover, or risk target. Uses internal bisection "
             "(no LLM round-trips). Use for 'minimum savings to stay solvent', "
-            "'maximum spending before failure', 'minimum sole prop income to reach FI by year Y', etc."
+            "'maximum spending before liquid assets run  out', 'minimum sole prop income to reach FI by year Y', etc."
         ),
         "parameters": {
             "type": "object",
@@ -209,31 +206,29 @@ FIND_THRESHOLD_SCHEMA = {
                     "type": "string",
                     "enum": sorted(_VALID_TARGETS),
                     "description": (
-                        "Predicate the threshold must satisfy. Default: plan_stays_solvent. "
+                        "Predicate the threshold must satisfy. Default: liquid_assets_through_bridge. "
                         "Choose the predicate that matches the user's actual concern:\n"
-                        "- plan_stays_solvent: all accounts never simultaneously hit zero. "
-                        "Very lenient — nearly impossible to fail with large retirement balances. "
-                        "Often gives a very low threshold with a huge final net worth, meaning "
-                        "the constraint was not actually binding.\n"
-                        "- final_net_worth_positive: total net worth (liquid + retirement) is "
-                        "positive at the last simulated year. Similar leniency to plan_stays_solvent.\n"
-                        "- no_early_withdrawals: never draws from penalty-territory retirement "
-                        "accounts before 59½. Very strict.\n"
                         "- liquid_assets_through_bridge: brokerage + cash + HSA stay positive "
-                        "only through the bridge period (years before the younger person turns 60, "
-                        "after which retirement accounts are penalty-free and can cover expenses). "
-                        "USE THIS as the default for 'what minimum income/savings lets both people "
-                        "stop W2?' questions. It gives a meaningful, lower threshold than "
-                        "liquid_assets_always_positive because it does not penalize late-retirement "
-                        "years when RMDs naturally refill liquid assets.\n"
-                        "- liquid_assets_always_positive: brokerage + cash + HSA never reach zero "
-                        "across ALL simulation years including post-73 RMD years. Usually converges "
-                        "to the same high number as no_early_withdrawals. Avoid for W2-stop questions.\n"
-                        "- final_liquid_assets_positive: brokerage + cash + HSA are positive at the "
-                        "end of the simulation. Use when temporary drawdown is acceptable but full "
-                        "depletion by plan end is not.\n"
-                        "- fi_crossover_exists: portfolio reaches FI (real returns cover full expenses "
-                        "including healthcare) at some point after both W2s stop.\n"
+                        "through the bridge period only (years before the younger person turns 60, "
+                        "after which retirement accounts are penalty-free). DEFAULT for all "
+                        "'what minimum income/savings lets both people stop W2?' questions. "
+                        "Gives a realistic threshold without penalizing late-retirement years when "
+                        "RMDs naturally refill liquid assets.\n"
+                        "- no_early_withdrawals: never draws from penalty-territory retirement "
+                        "accounts before 59½. Use only when the user explicitly wants to avoid "
+                        "any pre-59½ retirement account access. Produces high thresholds.\n"
+                        "- final_net_worth_positive: total net worth (liquid + retirement) > 0 at "
+                        "the last simulated year. Lenient end-state check. Use for 'maximum "
+                        "spending before the portfolio is fully depleted at plan end'.\n"
+                        "- final_net_worth_at_least: total net worth >= target_net_worth at the "
+                        "last simulated year. Requires target_net_worth parameter. Use for "
+                        "'what is the maximum spending and still leave $X for heirs?' or any "
+                        "question requiring a specific minimum end-balance.\n"
+                        "- final_liquid_assets_positive: brokerage + cash + HSA > 0 at the end "
+                        "of the simulation. Use when temporary drawdown is acceptable but full "
+                        "liquid depletion by plan end is not.\n"
+                        "- fi_crossover_exists: portfolio reaches FI (real returns cover full "
+                        "expenses including healthcare) at some point in the simulation.\n"
                         "- fi_crossover_by_year: FI crossover occurs on or before target_fi_year "
                         "(requires target_fi_year parameter)."
                     ),
@@ -244,7 +239,14 @@ FIND_THRESHOLD_SCHEMA = {
                         "Calendar year ceiling when target is fi_crossover_by_year "
                         "(e.g. 2030 means FI must be reached by end of 2030)."
                     ),
-                    
+                },
+                "target_net_worth": {
+                    "type": "number",
+                    "description": (
+                        "Minimum total net worth required at the last simulated year when "
+                        "target is final_net_worth_at_least (e.g. 500000 means the portfolio "
+                        "must end at or above $500,000). Required when using that target."
+                    ),
                 },
                 "context_overrides": {
                     "type": "object",

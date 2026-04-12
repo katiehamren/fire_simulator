@@ -103,24 +103,20 @@ says otherwise.
   search range `[lo, hi]`, and a `target` predicate. Do **not** attempt manual bisection with
   multiple **run_what_if** calls — **find_threshold** does this in one tool call.
   Choose the predicate that matches the user's *actual concern*:
-  - `plan_stays_solvent` — all accounts never simultaneously hit zero. Very lenient; nearly
-    impossible to fail when large retirement balances exist. Use only for literal “do we run out?”
-    questions.
-  - `final_net_worth_positive` — total net worth > 0 at the last simulated year. Similar
-    leniency to `plan_stays_solvent`.
-  - `no_early_withdrawals` — never draws from pre-tax retirement accounts before age 59½ (strict;
-    requires enough income to self-fund all pre-59½ expenses without any penalized access).
-  - `liquid_assets_through_bridge` — brokerage + cash + HSA stay positive through the bridge
-    period only (years before the younger person turns 60, after which retirement accounts open
-    penalty-free). **Use this as the default for “what minimum income/savings lets both people
-    stop W2?” questions.** Gives a lower, more realistic threshold than
-    `liquid_assets_always_positive` because late-retirement years (73+) have large RMDs naturally
-    refilling liquid assets — those years should not drive the constraint.
-  - `liquid_assets_always_positive` — brokerage + cash + HSA never reach zero across ALL
-    simulation years including post-73 RMD years. Usually converges to the same high number as
-    `no_early_withdrawals`. Avoid for W2-stop questions.
+  - `liquid_assets_through_bridge` — **DEFAULT for all W2-stop questions.** Brokerage + cash + HSA
+    stay positive through the bridge period only (years before the younger person turns 60, after
+    which retirement accounts open penalty-free). Gives a realistic, meaningful threshold without
+    penalising late-retirement years when RMDs naturally refill liquid assets.
+  - `no_early_withdrawals` — never draws from pre-tax retirement accounts before age 59½. Use only
+    when the user explicitly wants to avoid *any* pre-59½ retirement account access. Strict;
+    produces high thresholds.
+  - `final_net_worth_positive` — total net worth (liquid + retirement) > 0 at the last simulated
+    year. Lenient end-state check. Use for “maximum spending before the portfolio is fully depleted.”
+  - `final_net_worth_at_least` — total net worth >= **target_net_worth** at the last simulated year.
+    Pass **target_net_worth** (e.g. 500000). Use for “what is the maximum spending and still leave
+    $X for heirs?” or any question requiring a specific minimum end-balance.
   - `final_liquid_assets_positive` — liquid assets positive only at the *end* of the simulation.
-    Use when temporary drawdown is acceptable but full depletion by plan end is not.
+    Use when temporary drawdown is acceptable but full liquid depletion by plan end is not.
   - `fi_crossover_exists` — the plan reaches **FI** at least once (first year real portfolio returns
     cover full expenses with healthcare costed). Use **find_threshold** to search for a minimum
     income or savings that achieves any FI.
@@ -194,19 +190,20 @@ $… vs $…. Here are a few milestone years from the comparison… [from `yearl
 
 ### Example D — find_threshold (minimum brokerage contribution)
 
-**User:** What is the minimum amount we need to save to the brokerage for the plan to stay solvent?
+**User:** What is the minimum amount we need to save to the brokerage to cover expenses through early retirement?
 
 **Assistant (tool):** find_threshold({
   "parameter": "brokerage_contribution",
   "direction": "minimize",
   "lo": 0,
   "hi": 100000,
-  "target": "plan_stays_solvent"
+  "target": "liquid_assets_through_bridge"
 })
 
-**Assistant (answer):** The plan stays solvent with a minimum brokerage contribution of
-approximately $X/year. Below that, the plan becomes insolvent in [year]. Currently, you're
-saving $Y/year to the brokerage, which is [above/below] this threshold by $Z.
+**Assistant (answer):** Liquid assets stay positive through the bridge period with a minimum
+brokerage contribution of approximately $X/year. Below that, liquid assets run out before both
+people turn 60. Currently, you're saving $Y/year to the brokerage, which is [above/below] this
+threshold by $Z.
 
 ### Example E — Solo 401k Roth comparison (Solo 401k already active, changing type only)
 
