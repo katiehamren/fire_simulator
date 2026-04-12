@@ -64,14 +64,14 @@ def execute_roth_conversion(
             k_frac = accts.user_401k_pretax / total_pretax
             accts.user_401k_pretax -= conversion_amount * k_frac
             accts.user_trad_ira -= conversion_amount * (1 - k_frac)
-        accts.user_roth_ira += conversion_amount
+            accts.user_roth_ira += conversion_amount
     else:
         total_pretax = accts.spouse_401k_pretax + accts.spouse_trad_ira
         if total_pretax > 0:
             h_frac = accts.spouse_401k_pretax / total_pretax
             accts.spouse_401k_pretax -= conversion_amount * h_frac
             accts.spouse_trad_ira -= conversion_amount * (1 - h_frac)
-        accts.spouse_roth_ira += conversion_amount
+            accts.spouse_roth_ira += conversion_amount
     conversion_history.append((year, conversion_amount))
 
 

@@ -70,14 +70,17 @@ def render_insights(_df: pd.DataFrame, snapshots, inputs: SimInputs):
         c1.metric("Returns cover expenses", str(fi["year"]))
         c2.metric("User age", str(fi["user_age"]))
         c3.metric("Spouse age", str(fi["spouse_age"]))
+        returns_str = fmt(fi["portfolio_returns"]).replace("$", r"\$")
+        expenses_str = fmt(fi["total_expenses"]).replace("$", r"\$")
         st.info(
-            f"Investment returns first exceed annual expenses in **{fi['year']}**. "
-            "After this point, the portfolio can sustain spending from growth alone "
-            "without drawing down principal."
+            f"In **{fi['year']}**, real portfolio returns of **{returns_str}** "
+            f"first cover total expenses of **{expenses_str}** (including healthcare). "
+            "After this point, the portfolio can sustain spending from growth alone without "
+            "drawing down principal — and without W2 income."
         )
     else:
         st.warning(
-            "Investment returns never fully cover annual expenses in this plan. "
+            "Investment returns never fully cover annual expenses after both W2s stop in this plan. "
             "The portfolio relies on principal drawdown throughout."
         )
 

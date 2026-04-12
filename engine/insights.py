@@ -9,21 +9,54 @@ from .models import SimInputs, YearSnapshot, CURRENT_YEAR
 from .simulator import run_simulation
 
 
-def fi_crossover(
-    snapshots: list[YearSnapshot], return_rate: float, inflation_rate: float
-) -> Optional[dict[str, Any]]:
-    """Year when total_net_worth * real_return_rate >= total_expenses.
+def _estimate_healthcare(inputs: SimInputs, year: int) -> float:
+    """Estimate annual healthcare cost for a year, ignoring employer coverage.
 
-    Uses the real (inflation-adjusted) return rate so that the comparison
-    reflects sustainable portfolio growth, not just nominal growth.
+    Uses the same mode (flat or ACA) as the main simulation but never
+    returns $0 for employer-covered years — the FI crossover needs to
+    know what expenses *would be* without a W2 plan.
+    """
+    inflation_factor = (1 + inputs.assumptions.inflation_rate) ** (year - CURRENT_YEAR)
+    if inputs.assumptions.healthcare_mode == "flat":
+        return inputs.assumptions.annual_healthcare_flat * inflation_factor
+    from .aca import estimate_aca_premium
+    aca_result = estimate_aca_premium(
+        magi=0.0,
+        year=year,
+        inflation_rate=inputs.assumptions.inflation_rate,
+        benchmark_override=inputs.assumptions.aca_benchmark_override or None,
+        arp_extended=inputs.assumptions.aca_arp_extended,
+    )
+    return aca_result["premium"] + inputs.assumptions.aca_additional_oop * inflation_factor
+
+
+def fi_crossover(
+    snapshots: list[YearSnapshot],
+    inputs: SimInputs,
+    return_rate: float,
+    inflation_rate: float,
+) -> Optional[dict[str, Any]]:
+    """First year where total portfolio real returns cover full expenses
+    assuming no employer healthcare (i.e. healthcare is always costed).
+
+    Searches from the current year so it can surface "you could stop
+    working earlier" when the portfolio already supports expenses.
+    For years where the snapshot has healthcare = 0 (employer-covered),
+    an estimated healthcare cost is added to total_expenses.
     """
     real_rate = max(0.0, return_rate - inflation_rate)
+
     for s in snapshots:
-        if s.total_net_worth * real_rate >= s.total_expenses:
+        expenses = s.total_expenses
+        if s.on_employer_healthcare:
+            expenses += _estimate_healthcare(inputs, s.year)
+        if s.total_net_worth * real_rate >= expenses:
             return {
                 "year": s.year,
                 "user_age": s.user_age,
                 "spouse_age": s.spouse_age,
+                "portfolio_returns": round(s.total_net_worth * real_rate),
+                "total_expenses": round(expenses),
             }
     return None
 
@@ -219,7 +252,7 @@ def compute_all_insights(
     return_rate = inputs.assumptions.market_return_rate
     inflation_rate = inputs.assumptions.inflation_rate
     return {
-        "fi_crossover": fi_crossover(snapshots, return_rate, inflation_rate),
+        "fi_crossover": fi_crossover(snapshots, inputs, return_rate, inflation_rate),
         "bridge_burn": bridge_burn(snapshots, inputs),
         "tax_windows": tax_windows(snapshots, inputs),
         "rmd_pressure": rmd_pressure(snapshots),

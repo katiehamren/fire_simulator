@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import streamlit as st
 
+from engine.insights import fi_crossover
 from engine.models import CURRENT_YEAR, SpendingOverride
 from engine.simulator import run_simulation
 
@@ -90,7 +91,7 @@ _COMPARE_METRICS = frozenset({
 })
 
 
-def _scenario_metrics(snapshots):
+def _scenario_metrics(snapshots, inputs=None):
     if not snapshots:
         return {
             "solvent_through_year": None,
@@ -99,11 +100,21 @@ def _scenario_metrics(snapshots):
             "peak_net_worth_year": None,
             "final_net_worth": None,
             "final_year": None,
+            "fi_crossover_year": None,
         }
     solvent_years = [s.year for s in snapshots if s.plan_solvent]
     insolvent_years = [s.year for s in snapshots if not s.plan_solvent]
     peak = max(snapshots, key=lambda s: s.total_net_worth)
     final = snapshots[-1]
+    fi_year = None
+    if inputs is not None:
+        fi = fi_crossover(
+            snapshots,
+            inputs,
+            inputs.assumptions.market_return_rate,
+            inputs.assumptions.inflation_rate,
+        )
+        fi_year = fi["year"] if fi else None
     return {
         "solvent_through_year": max(solvent_years) if solvent_years else None,
         "first_insolvent_year": min(insolvent_years) if insolvent_years else None,
@@ -111,6 +122,7 @@ def _scenario_metrics(snapshots):
         "peak_net_worth_year": peak.year,
         "final_net_worth": final.total_net_worth,
         "final_year": final.year,
+        "fi_crossover_year": fi_year,
     }
 
 
@@ -284,8 +296,8 @@ def run_what_if(overrides: dict, compare_metric: str = None, *, _sim_count, max_
     modified_snaps = run_simulation(modified_inputs)
     _sim_count[0] += 1
 
-    b_met = _scenario_metrics(baseline_snaps)
-    m_met = _scenario_metrics(modified_snaps)
+    b_met = _scenario_metrics(baseline_snaps, baseline_inputs)
+    m_met = _scenario_metrics(modified_snaps, modified_inputs)
     cm = compare_metric if compare_metric in _COMPARE_METRICS else "total_net_worth"
 
     st_yr_b = b_met["solvent_through_year"]
@@ -298,6 +310,12 @@ def run_what_if(overrides: dict, compare_metric: str = None, *, _sim_count, max_
     elif st_yr_m is None and st_yr_b is not None:
         solv_delta = None
 
+    fi_yr_b = b_met["fi_crossover_year"]
+    fi_yr_m = m_met["fi_crossover_year"]
+    fi_delta = None
+    if fi_yr_b is not None and fi_yr_m is not None:
+        fi_delta = fi_yr_m - fi_yr_b
+
     applied = {k: overrides[k] for k in overrides if k in _WHAT_IF_OVERRIDE_KEYS}
 
     return {
@@ -305,6 +323,7 @@ def run_what_if(overrides: dict, compare_metric: str = None, *, _sim_count, max_
         "modified": m_met,
         "delta": {
             "solvent_through_year_delta": solv_delta,
+            "fi_crossover_year_delta": fi_delta,
             "final_net_worth_delta": (m_met["final_net_worth"] or 0) - (b_met["final_net_worth"] or 0),
             "peak_net_worth_delta": (m_met["peak_net_worth"] or 0) - (b_met["peak_net_worth"] or 0),
         },
@@ -391,7 +410,16 @@ RUN_WHAT_IF_SCHEMA = {
                         },
                         "user_solo_401k_ee": {
                             "type": "number",
-                            "description": "Solo 401(k) employee deferral per year ($). Active when sole prop > $0 and User has no W2.",
+                            "description": (
+                                "Solo 401(k) employee elective deferral per year ($). Active whenever "
+                                "sole prop income > $0 — including years when User also has W2 income. "
+                                "CRITICAL: the IRS $23,500 employee deferral cap is SHARED between the "
+                                "W2 401(k) and the Solo 401(k). The simulator subtracts the W2 401(k) "
+                                "contribution first; if the W2 plan is still maxed, remaining Solo EE "
+                                "room is $0 and this override has no effect. To redirect W2 401(k) "
+                                "deferrals to the Solo plan, ALWAYS pair this with "
+                                "user_401k_mode='dollar' and user_401k_amount=0."
+                            ),
                         },
                         "user_solo_401k_ee_type": {
                             "type": "string",

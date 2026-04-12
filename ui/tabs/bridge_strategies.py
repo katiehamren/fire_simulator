@@ -98,7 +98,7 @@ def render_bridge_strategies(df: pd.DataFrame, inputs: SimInputs):
                 "Each Roth conversion starts its own **5-year clock**. "
                 "The *converted principal* (not earnings) becomes accessible penalty-free "
                 "once 5 years have passed since that conversion year. "
-                "For example, a $50,000 conversion in 2029 produces $50,000 of accessible Roth principal "
+                r"For example, a \$50,000 conversion in 2029 produces \$50,000 of accessible Roth principal "
                 "starting in 2034.\n\n"
                 "This simulator tracks only converted principal. Roth earnings remain locked until "
                 "age 59½ (or are subject to a 10% penalty). Existing Roth IRA contributions "
