@@ -44,13 +44,18 @@ def test_compute_rmd_credited_against_sepp_spouse():
     assert user_rmd == pytest.approx(raw)
 
 
-def test_solo_401k_ee_zero_while_w2_active_er_allowed(default_inputs):
+def test_solo_401k_ee_combined_cap_with_w2(default_inputs):
+    # W2 uses $10k (dollar mode), leaving 23,500 - 10,000 = 13,500 of the shared EE limit.
+    # Solo EE request of $20k is capped at the remaining room.
     default_inputs.contributions.user_solo_401k_ee = 20_000
     default_inputs.contributions.user_solo_401k_er_pct = 0.10
     inc = build_year_income(default_inputs, 2026)
     ca = build_contribution_amounts(default_inputs, 2026, inc)
+    ee_limit = annual_401k_ee_limit(2026)
+    expected_solo_ee = ee_limit - ca.user_401k_contrib  # 23_500 - 10_000 = 13_500
     assert inc.user_w2 > 0
-    assert ca.solo_ee_pretax == 0.0 and ca.solo_ee_roth == 0.0
+    assert ca.solo_ee_pretax == pytest.approx(expected_solo_ee)
+    assert ca.user_401k_contrib + ca.solo_ee_pretax == pytest.approx(ee_limit)
     assert ca.solo_er_pretax == pytest.approx(0.10 * inc.sole_prop)
 
 

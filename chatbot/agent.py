@@ -71,7 +71,11 @@ def _dispatch_tool(
             args.get("lo", 0),
             args.get("hi", 0),
             args.get("tolerance", 500.0),
-            args.get("target", "plan_stays_solvent"),
+            args.get("target", "liquid_assets_through_bridge"),
+            args.get("target_fi_year"),
+            args.get("context_overrides"),
+            target_net_worth=args.get("target_net_worth"),
+            max_iterations=args.get("max_iterations", 30),
         )
     if name == "web_search":
         return web_search(

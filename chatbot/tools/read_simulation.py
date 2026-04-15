@@ -2,6 +2,7 @@
 
 import streamlit as st
 
+from engine.insights import compute_all_insights
 from engine.tax_calc import compute_federal_tax
 
 from .utils import bridge_years, filter_years, snap_to_dict
@@ -16,6 +17,7 @@ _TAX_METHOD = (
 _VALID_QUERIES = frozenset({
     "summary", "yearly_detail", "rmds", "income_sources",
     "account_balances", "bridge_period", "cashflow", "roth_ladder", "sepp",
+    "insights",
 })
 
 
@@ -277,6 +279,26 @@ def _handle_roth_ladder(snapshots, inputs, start_year, end_year) -> dict:
     }
 
 
+def _handle_insights(snapshots, inputs) -> dict:
+    return {
+        "data": compute_all_insights(snapshots, inputs),
+        "inputs_context": {
+            "market_return_rate": inputs.assumptions.market_return_rate,
+            "inflation_rate": inputs.assumptions.inflation_rate,
+            "note": (
+                "data keys match the Insights tab. "
+                "fi_crossover: first year real portfolio returns cover full expenses "
+                "(healthcare costed as if not on an employer plan). "
+                "bridge_burn: liquid assets and cashflow over the bridge period (pre-59.5 gap). "
+                "tax_windows: lowest effective-tax years after both W2s stop. "
+                "rmd_pressure: first RMD year, peak RMD vs expenses, etc. "
+                "income_dependency: shadow runs with sole prop or rental zeroed (solvency impact). "
+                "lifetime_tax: total taxes split accumulation vs drawdown, avg effective rates."
+            ),
+        },
+    }
+
+
 def _handle_sepp(snapshots, inputs) -> dict:
     sepp = inputs.sepp
     if not sepp.enabled:
@@ -349,6 +371,8 @@ def read_simulation(query: str, start_year: int = None, end_year: int = None) ->
         return _handle_roth_ladder(snapshots, inputs, start_year, end_year)
     if query == "sepp":
         return _handle_sepp(snapshots, inputs)
+    if query == "insights":
+        return _handle_insights(snapshots, inputs)
 
 
 READ_SIMULATION_SCHEMA = {
@@ -376,7 +400,9 @@ READ_SIMULATION_SCHEMA = {
                         "'bridge_period': cashflow detail during the pre-59.5 gap between W2 stop and 401k access. "
                         "'cashflow': net cashflow, surplus/deficit flag, early withdrawals by year. "
                         "'roth_ladder': conversion amounts, tax cost, and seasoned accessible balance by year. "
-                        "'sepp': SEPP payment schedule and plan parameters."
+                        "'sepp': SEPP payment schedule and plan parameters. "
+                        "'insights': FI crossover year, bridge burn, tax windows, RMD pressure, "
+                        "income dependency, lifetime tax (same bundle as the Insights tab)."
                     ),
                 },
                 "start_year": {
