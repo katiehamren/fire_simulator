@@ -170,9 +170,10 @@ FIND_THRESHOLD_SCHEMA = {
         "name": "find_threshold",
         "description": (
             "Find the minimum or maximum value of a single simulation parameter "
-            "that satisfies a solvency, FI crossover, or risk target. Uses internal bisection "
-            "(no LLM round-trips). Use for 'minimum savings to stay solvent', "
-            "'maximum spending before liquid assets run  out', 'minimum sole prop income to reach FI by year Y', etc."
+            "that satisfies a bridge liquidity, net worth, FI crossover, or early-withdrawal target. "
+            "Uses internal bisection (no LLM round-trips). Use for 'minimum sole prop income to "
+            "cover the bridge period', 'maximum spending before the portfolio is depleted', "
+            "'minimum savings to leave $X for heirs', 'minimum income to reach FI by year Y', etc."
         ),
         "parameters": {
             "type": "object",
