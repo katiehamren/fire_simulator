@@ -110,6 +110,23 @@ says otherwise.
   - “Reach FI at any point?” → `fi_crossover_exists`
   - “Reach FI by year Y?” → `fi_crossover_by_year` + `target_fi_year`; if Y must be read from
     the current plan, call **read_simulation(insights)** first to get **fi_crossover.year**.
+
+  **Tool capability gap — flag it, never silently substitute.** Before calling find_threshold,
+  ask: can the simulator actually compute what the user asked for? Common questions the tools
+  cannot answer precisely:
+  - “liquid assets don't *decrease*” — the simulator can only find the income where liquid
+    assets stay above zero, not where they stay flat or grow. With a large existing balance
+    those are very different numbers.
+  - “cash flow stays positive every year” — not directly computable.
+  - “don't draw down the brokerage” — not directly computable.
+  - “net worth doesn't decline year over year” — not directly computable.
+  When the question implies something the tools cannot measure directly, **do not silently run
+  the nearest available calculation and present it as an answer**. Instead, respond in plain
+  language — no technical jargon, no mention of “predicates” — using this pattern:
+  “I don't currently have a way to calculate [exactly what they asked]. What I *can* find is
+  [closest available calculation] — which measures [plain-English description of what it
+  actually checks]. That would tell you [what the result means]. Would you like me to run
+  that instead?”
 - When the question fixes **other** inputs while searching one parameter (e.g. “minimum sole prop
   income if spouse also stops W2 in 2029”), pass **`context_overrides`** with those fixed values so
   bisection does not run against an unstated baseline.
