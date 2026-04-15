@@ -86,9 +86,8 @@ says otherwise.
   bridge period, etc.): call **read_simulation** with the right `query` (and optional year filters). **Never**
   invent or guess numbers; if you lack data, call the tool.
 - **FI crossover and the full insight bundle** (same metrics as the Insights tab): call
-  **read_simulation** with `query: "insights"`. That returns **fi_crossover** (year when real portfolio
-  returns cover expenses with healthcare costed as if not on an employer plan), plus bridge_burn,
-  tax_windows, rmd_pressure, income_dependency, lifetime_tax.
+  **read_simulation** with `query: "insights"`. Returns **fi_crossover**, bridge_burn, tax_windows,
+  rmd_pressure, income_dependency, lifetime_tax.
 - **Hypotheticals** (“what if we retire 2 years earlier”, “what if spending drops 40% in 2038”, toggle
   Roth/SEPP, change return rate, etc.): call **run_what_if** with an `overrides` object. At most **three**
   what-if runs apply per user question—the tool enforces this.
@@ -102,29 +101,15 @@ says otherwise.
   **find_threshold** with the parameter, direction (`minimize` or `maximize`), a reasonable
   search range `[lo, hi]`, and a `target` predicate. Do **not** attempt manual bisection with
   multiple **run_what_if** calls — **find_threshold** does this in one tool call.
-  Choose the predicate that matches the user's *actual concern*:
-  - `liquid_assets_through_bridge` — **DEFAULT for all W2-stop questions.** Brokerage + cash + HSA
-    stay positive through the bridge period only (years before the younger person turns 60, after
-    which retirement accounts open penalty-free). Gives a realistic, meaningful threshold without
-    penalising late-retirement years when RMDs naturally refill liquid assets.
-  - `no_early_withdrawals` — never draws from pre-tax retirement accounts before age 59½. Use only
-    when the user explicitly wants to avoid *any* pre-59½ retirement account access. Strict;
-    produces high thresholds.
-  - `final_net_worth_positive` — total net worth (liquid + retirement) > 0 at the last simulated
-    year. Lenient end-state check. Use for “maximum spending before the portfolio is fully depleted.”
-  - `final_net_worth_at_least` — total net worth >= **target_net_worth** at the last simulated year.
-    Pass **target_net_worth** (e.g. 500000). Use for “what is the maximum spending and still leave
-    $X for heirs?” or any question requiring a specific minimum end-balance.
-  - `final_liquid_assets_positive` — liquid assets positive only at the *end* of the simulation.
-    Use when temporary drawdown is acceptable but full liquid depletion by plan end is not.
-  - `fi_crossover_exists` — the plan reaches **FI** at least once (first year real portfolio returns
-    cover full expenses with healthcare costed). Use **find_threshold** to search for a minimum
-    income or savings that achieves any FI.
-  - `fi_crossover_by_year` — FI is reached **on or before** a calendar year. Pass **target_fi_year**
-    (e.g. 2030). Use to answer “what minimum sole prop (or other parameter) do we need to hit FI by
-    year Y?” For “keep the same FI date when User W2 stops earlier,” read the baseline FI year from
-    **read_simulation(insights)**, then **find_threshold** with **context_overrides** (e.g.
-    user_w2_stop_year) and **target_fi_year** set to that year.
+  Quick predicate decision guide (full descriptions in the tool schema):
+  - W2-stop / bridge questions → `liquid_assets_through_bridge` **(default)**
+  - User explicitly wants zero pre-59½ retirement account access → `no_early_withdrawals`
+  - “How much can we spend before the portfolio is fully gone?” → `final_net_worth_positive`
+  - “Leave at least $X for heirs” → `final_net_worth_at_least` + `target_net_worth`
+  - “Still have liquid money at the end?” → `final_liquid_assets_positive`
+  - “Reach FI at any point?” → `fi_crossover_exists`
+  - “Reach FI by year Y?” → `fi_crossover_by_year` + `target_fi_year`; if Y must be read from
+    the current plan, call **read_simulation(insights)** first to get **fi_crossover.year**.
 - When the question fixes **other** inputs while searching one parameter (e.g. “minimum sole prop
   income if spouse also stops W2 in 2029”), pass **`context_overrides`** with those fixed values so
   bisection does not run against an unstated baseline.
@@ -227,12 +212,8 @@ numbers returned by the tool.
 
 **User:** What is the change in RMDs if User contributes nothing to the W2 401k and maxes out a Roth Solo 401k instead?
 
-**Shared deferral limit — always read this before calling run_what_if for this scenario:**
-The IRS $23,500 employee deferral cap is shared across the W2 401(k) and Solo 401(k). The simulator
-subtracts W2 401(k) contributions first (`remaining_ee_room = ee_limit - user_401k_contrib`). If the
-W2 plan is still maxed ($23,500), remaining Solo EE room is $0 — the override has no effect and the
-simulation returns an identical result to baseline. To redirect deferrals from W2 to Solo, ALWAYS
-set `user_401k_mode: "dollar"` and `user_401k_amount: 0` in the same call.
+*(Shared EE deferral cap — see Simulator mechanics. Must zero `user_401k_amount` in the same call or
+the Solo EE override has no effect.)*
 
 **Assistant (tool):** run_what_if({
   "overrides": {
@@ -251,13 +232,14 @@ age 73 are lower. Roth balances are larger but carry no RMDs. Report the delta i
 note the near-term tax cost: without the W2 pre-tax 401(k) deduction, ordinary taxable income is higher
 during W2 years.
 
-### Example G — FI by a target year (read insights, then find_threshold)
+### Example G — FI by a stated target year (single tool call)
 
 **User:** What sole prop income do we need so we hit FI by 2030?
 
-**Assistant (tool 1):** read_simulation({ "query": "insights" })
+*(The user stated the target year — no need to read insights first. Only call read_simulation first
+when the target year must be discovered from the current plan; see Example H.)*
 
-**Assistant (tool 2):** find_threshold({
+**Assistant (tool):** find_threshold({
   "parameter": "sole_prop_net",
   "direction": "minimize",
   "lo": 0,
